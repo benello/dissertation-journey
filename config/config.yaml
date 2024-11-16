@@ -1,0 +1,25 @@
+# Training parameters
+training:
+  epochs: 10
+  batch_size: 32
+  learning_rate: 0.001
+  device: 'cuda'  # will fall back to 'cpu' if cuda not available
+
+# Model architecture
+model:
+  conv_channels: [32, 64, 64]
+  kernel_size: 3
+  num_classes: 10
+
+# Visualization
+visualization:
+  num_samples: 1000
+  fig_size: [15, 5]
+  tsne_perplexity: 30
+  tsne_random_state: 42
+
+# Data
+data:
+  data_dir: './data'
+  train_normalize_mean: [0.1307]
+  train_normalize_std: [0.3081]
