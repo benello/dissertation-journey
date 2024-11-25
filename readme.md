@@ -4,26 +4,28 @@ This project provides tools for training a CNN on the MNIST dataset and visualiz
 
 ## Features
 
-- Clean, modular implementation of a CNN for MNIST classification
-- Feature extraction and visualization using PCA and t-SNE
+- Feature extraction and visualization using PCA, t-SNE, Parallel Analysis and Kaiser Harris
 - Configurable model architecture and training parameters
-- Comprehensive visualizations of the feature space
 
 ## Project Structure
 
 ```
-cnn_feature_vis/
+dissertation-journey/
 ├── requirements.txt    # Project dependencies
-├── README.md          # This file
+├── README.md           # This file
+├── main.py             # Main script
 ├── src/
-│   ├── model.py       			# CNN model definition
-│   ├── trainer.py     			# Training functionality
-│   ├── visualizer.py  			# PCA and visualization code
-│   ├── utils.py       			# Helper functions
-│   └── activation_visualizer.py	# 
+│   ├── model.py                    # CNN model definition
+│   ├── trainer.py                  # Training functionality
+│   ├── dimension_analysis.py       # Advanced dimensionality analysis using Parallel Analysis, PCA, Kaiser Harris
+│   ├── activation_visualizer.py    # Layer activation visualization
+│   ├── novel_generator.py          # Novel number representation generator
+│   ├── novel_loader.py             # Dataset loader for novel representations
+│   └── utils.py                    # Helper functions
 ├── config/
-│   └── config.yaml    # Configuration parameters
-└── main.py           # Main script
+│   └── config.yaml     # Configuration parameters
+└── assets/
+    └── fonts/                      # Font files for number generation
 ```
 
 ## Installation
@@ -84,10 +86,12 @@ The model and training parameters can be configured in `config/config.yaml`. Key
 
 ## Visualization Output
 
-The script generates three visualizations:
+The script generates the following visualizations:
 
 1. PCA explained variance ratio plot
 2. First two PCA components scatter plot
 3. t-SNE visualization of the feature space
+4. Parallel Analysis dimension analysis
+5. Kaiser Harris dimension analysis
 
 Output files are saved in the `outputs/figures` directory.

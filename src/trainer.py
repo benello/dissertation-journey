@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import logging
+from src.novel_loader import NovelDataset
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ class ModelTrainer:
             config: Configuration dictionary
         """
         self.model = model
-        self.config = config
+        self.config = config['training']
         self.device = model.device
         self.model.to(self.device)
         
@@ -27,42 +28,42 @@ class ModelTrainer:
             self.model.parameters(), 
             lr=config['training']['learning_rate']
         )
+
+        self.train_loader, self.test_loader = self._get_data_loaders(config['data'])
         
-        self.train_loader, self.test_loader = self._get_data_loaders()
-        
-    def _get_data_loaders(self):
+    def _get_data_loaders(self, data_config):
         """Create train and test data loaders."""
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(
-                self.config['data']['train_normalize_mean'],
-                self.config['data']['train_normalize_std']
+                data_config['train_normalize_mean'],
+                data_config['train_normalize_std'],
             )
         ])
         
         train_dataset = datasets.MNIST(
-            self.config['data']['data_dir'], 
-            train=True, 
+            data_config['data_dir'],
+            train=True,
             download=True, 
-            transform=transform
+            transform=transform,
         )
         
         test_dataset = datasets.MNIST(
-            self.config['data']['data_dir'], 
+            data_config['data_dir'],
             train=False, 
-            transform=transform
+            transform=transform,
         )
         
         train_loader = DataLoader(
             train_dataset,
-            batch_size=self.config['training']['batch_size'],
-            shuffle=True
+            batch_size=self.config['batch_size'],
+            shuffle=True,
         )
         
         test_loader = DataLoader(
             test_dataset,
-            batch_size=self.config['training']['batch_size'],
-            shuffle=False
+            batch_size=self.config['batch_size'],
+            shuffle=False,
         )
         
         return train_loader, test_loader
@@ -72,7 +73,7 @@ class ModelTrainer:
         logger.info("Starting training...")
         self.model.train()
         
-        for epoch in range(self.config['training']['epochs']):
+        for epoch in range(self.config['epochs']):
             total_loss = 0
             for (data, target) in self.train_loader:
                 data, target = data.to(self.device), target.to(self.device)
@@ -87,7 +88,7 @@ class ModelTrainer:
 
             
             avg_loss = total_loss / len(self.train_loader)
-            logger.info(f'Epoch {epoch+1}/{self.config["training"]["epochs"]}, '
+            logger.info(f'Epoch {epoch+1}/{self.config["epochs"]}, '
                        f'Average Loss: {avg_loss:.4f}')
     
     def save_model(self, path):
@@ -113,11 +114,9 @@ class ModelTrainer:
         
         with torch.no_grad():
             for data, target in self.test_loader:
-                data, target = data.to(self.device), target.to(self.device)
-                output, _ = self.model(data)
-                test_loss += self.criterion(output, target).item()
-                pred = output.argmax(dim=1)
-                correct += pred.eq(target).sum().item()
+                loss, corr = self._eval_core(data, target)
+                test_loss += loss
+                correct += corr
         
         test_loss /= len(self.test_loader)
         accuracy = 100. * correct / len(self.test_loader.dataset)
@@ -125,3 +124,37 @@ class ModelTrainer:
         logger.info(f'Test set: Average loss: {test_loss:.4f}, '
                    f'Accuracy: {correct}/{len(self.test_loader.dataset)} '
                    f'({accuracy:.2f}%)')
+
+    def evaluate_novel(self, novel_data_path):
+        """Evaluate the model on novel test data."""
+        self.model.eval()
+        test_loss = 0
+        correct = 0
+
+        novel_loader = DataLoader(
+            NovelDataset(novel_data_path),
+            batch_size=self.config['batch_size'],
+            shuffle=False,
+        )
+
+        with torch.no_grad():
+            for data, target in novel_loader:
+                loss, corr = self._eval_core(data, target)
+                test_loss += loss
+                correct += corr
+
+        test_loss /= len(novel_loader)
+        accuracy = 100. * correct / len(novel_loader.dataset)
+
+        logger.info(f'Novel set: Average loss: {test_loss:.4f}, '
+                    f'Accuracy: {correct}/{len(novel_loader.dataset)} '
+                    f'({accuracy:.2f}%)')
+
+    def _eval_core(self, data, target):
+        data, target = data.to(self.device), target.to(self.device)
+        output, _ = self.model(data)
+        test_loss = self.criterion(output, target).item()
+        pred = output.argmax(dim=1)
+        correct = pred.eq(target).sum().item()
+
+        return test_loss, correct

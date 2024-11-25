@@ -17,9 +17,24 @@ visualization:
   fig_size: [15, 5]
   tsne_perplexity: 30
   tsne_random_state: 42
+  iterations: 1000
+  percentile: 95
 
 # Data
 data:
   data_dir: './data'
   train_normalize_mean: [0.1307]
   train_normalize_std: [0.3081]
+
+# Image Generation Parameters
+generation:
+  image_size: 28
+  font_size_ratio: 0.75  # Proportion of image size used for font
+  target_ratio: 0.7  # Target character size relative to image size
+  dot_size_ratio: 10  # Dot diameter is image_size divided by this value
+  font_path: 'assets/fonts/NotoSansCJKjp-Regular.otf'
+  # Number Mappings
+  mappings:
+    chinese: [ '零', '一', '二', '三', '四', '五', '六', '七', '八', '九' ]
+    roman: [ 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX' ]
+    dots: [ '1', '2', '3', '4', '5', '6', '7', '8', '9' ]

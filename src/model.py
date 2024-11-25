@@ -9,9 +9,10 @@ class FeatureVisualizerCNN(nn.Module):
         Initialize the CNN model.
         
         Args:
-            conv_channels (list): List of channel sizes for conv layers
-            kernel_size (int): Size of convolutional kernels
-            num_classes (int): Number of output classes
+            conv_channels: List of channel sizes for conv layers
+            kernel_size: Size of convolutional kernels
+            num_classes: Number of output classes
+            config: Configuration dictionary
         """
         super(FeatureVisualizerCNN, self).__init__()
         
@@ -21,14 +22,14 @@ class FeatureVisualizerCNN(nn.Module):
         
         for out_channels in conv_channels:
             layers.extend([
-                nn.Conv2d(in_channels, out_channels, kernel_size),
+                nn.Conv2d(in_channels, out_channels, kernel_size),  # size of feature map - size = (input_size - kernel_size + 2*padding)/stride + 1
                 nn.ReLU(),
             ])
             in_channels = out_channels
         
         layers.extend([
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Flatten()
+            nn.AdaptiveAvgPool2d((1, 1)),   # Reduces spatial dimensions from final 22x22 to 1x1. Effectively getting the average of the whole feature map
+            nn.Flatten()    # Converts to 2D
         ])
 
         self.conv_layers = nn.Sequential(*layers)
