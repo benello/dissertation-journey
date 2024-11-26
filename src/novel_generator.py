@@ -7,8 +7,8 @@ from pathlib import Path
 import urllib.request
 import sys
 
-image_filename = 'images.ubyte'
-label_filename = 'labels.ubyte'
+image_filename = 'novel_images.ubyte'
+label_filename = 'novel_labels.ubyte'
 
 logger = logging.getLogger(__name__)
 
@@ -214,9 +214,15 @@ class NovelGenerator:
 
     def _save_mnist_images(self, images):
         """Save MNIST image format to disk."""
+        image_path = self.output_dir / image_filename
+
+        # Nothing to do as file exists
+        if image_path.exists():
+            return
+
         image_size = self.config['image_size']
 
-        with open(self.output_dir / 'images.ubyte', 'wb') as f:
+        with open(image_path, 'wb') as f:
             # Write header
             f.write(struct.pack('>IIII',        # specify header format (big endian+4uint)
                                 2051,           # magic number
@@ -227,7 +233,13 @@ class NovelGenerator:
 
     def _save_mnist_labels(self, labels):
         """Save MNIST label format to disk."""
-        with open(self.output_dir / 'labels.ubyte', 'wb') as f:
+        label_path = self.output_dir / label_filename
+
+        # Nothing to do as file exists
+        if label_path.exists():
+            return
+
+        with open(label_path, 'wb') as f:
             # Write header
             f.write(struct.pack('>II',  # specify header format (big endian+2uint)
                     2049,               # magic number

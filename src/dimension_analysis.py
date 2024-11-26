@@ -112,11 +112,6 @@ class DimensionalityAnalyser:
         # Perform Kaiser-Harris analysis
         kh_components, kh_eig = self.kaiser_harris()
 
-        # Log results
-        logger.info("\nDimensionality Analysis Results:")
-        logger.info(f"Parallel Analysis recommended components: {pa_components}")
-        logger.info(f"Kaiser-Harris recommended components: {kh_components}")
-
         return {
             'pa_components': pa_components,
             'kh_components': kh_components,
@@ -215,7 +210,7 @@ class DimensionalityAnalyser:
         plt.tight_layout()
 
         # Print PCA statistics
-        logger.info("\nPCA Analysis Summary:")
+        logger.info("\nAnalysis Summary:")
         logger.info(f"Total explained variance: {sum(pca.explained_variance_ratio_):.4f}")
         logger.info(f"Number of components for 90% variance: "
                     f"{len([x for x in cumulative_var if x <= 0.9]) + 1}")

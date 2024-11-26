@@ -33,7 +33,7 @@ dissertation-journey/
 1. Clone the repository:
 ```bash
 git clone https://github.com/benello/dissertation-journey.git
-cd cnn_feature_vis
+cd dissertation-journey
 ```
 
 2. Create a virtual environment (optional but recommended):
@@ -56,12 +56,12 @@ python main.py --train
 
 2. Create visualizations:
 ```bash
-python main.py --visualize
+python main.py --visualize-dimension-analysis
 ```
 
 3. Train and visualize in one go:
 ```bash
-python main.py --train --visualize
+python main.py --train --visualize-dimension-analysis
 ```
 
 4. Visualize activations for a random digit

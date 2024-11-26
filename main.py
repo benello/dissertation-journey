@@ -1,8 +1,6 @@
 import argparse
 import logging
 
-from jedi.api.file_name import complete_file_name
-
 from src.dimension_analysis import DimensionalityAnalyser
 from src.model import FeatureVisualizerCNN
 from src.novel_generator import NovelGenerator
@@ -21,10 +19,6 @@ def parse_args():
     # Data Generation
     parser.add_argument('--use-novel', action='store_true',
                         help='Generate novel MNIST-like dataset')
-    parser.add_argument('--representation', type=str, choices=['chinese', 'roman', 'dots', 'all'],
-                        default='all', help='Type of number representation to generate')
-    parser.add_argument('--samples', type=int,
-                        help='Number of samples per class to generate (overrides config)')
 
     # Training and Model Options
     parser.add_argument('--train', action='store_true',
@@ -39,12 +33,6 @@ def parse_args():
                         help='Generate and save example images for each representation')
     parser.add_argument('--digit', type=int, default=None,
                         help='Specific digit to visualize (0-8)')
-
-    # Advanced Options
-    parser.add_argument('--save-mnist', action='store_true',
-                        help='Save generated data in MNIST binary format')
-    parser.add_argument('--font-path', type=str,
-                        help='Custom font path (overrides config)')
 
     args = parser.parse_args()
 
