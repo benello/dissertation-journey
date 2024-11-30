@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import logging
 from typing import Dict, List, Tuple
 from collections import defaultdict
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -128,3 +129,99 @@ class ActivationVisualizer:
                 results[name] = top_channels
         
         return results
+
+activations_path = 'activations'
+
+class ActivationSaver:
+    """Handles saving and loading of neural network activations."""
+
+    def __init__(self, base_dir: Path):
+        """
+        Initialize the activation saver.
+
+        Args:
+            base_dir: Base directory where activation files will be saved
+        """
+        self.base_dir = base_dir / activations_path
+
+    def save_activations(self, activations: Dict[str, List[torch.Tensor]],
+                         image_name: str = "default"):
+        """
+        Save activations from each layer to separate files.
+
+        Args:
+            activations: Dictionary mapping layer names to activation tensors
+            image_name: Name identifier for the input image being processed
+        """
+        # Create a subdirectory for this image
+        image_dir = self.base_dir / image_name
+        image_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save activations for each layer
+        for layer_name, acts in activations.items():
+            # Clean layer name for filename
+            clean_name = self._clean_name(layer_name)
+
+            # Convert activation to numpy and save
+            act_array = acts[0].numpy()  # Get first (and only) batch
+
+            # Save metadata about the activation
+            metadata = {
+                "layer_name": layer_name,
+                "shape": act_array.shape,
+                "mean": float(np.mean(act_array)),
+                "std": float(np.std(act_array)),
+                "max": float(np.max(act_array)),
+                "min": float(np.min(act_array))
+            }
+
+            # Save both the activation array and its metadata
+            np.save(image_dir / f"{clean_name}_activation.npy", act_array)
+            np.save(image_dir / f"{clean_name}_metadata.npy", metadata)
+
+            logger.info(f"Saved activation for layer {layer_name} with shape {act_array.shape}")
+
+    def load_activation(self, layer_name: str,
+                        image_name: str = "default") -> Tuple[np.ndarray, Dict]:
+        """
+        Load activation data for a specific layer.
+
+        Args:
+            layer_name: Name of the layer whose activation to load
+            image_name: Name identifier of the input image
+
+        Returns:
+            Tuple of (activation array, metadata dictionary)
+        """
+        image_dir = self.base_dir / image_name
+        clean_name = self._clean_name(layer_name)
+
+        # Load activation array and metadata
+        act_path = image_dir / f"{clean_name}_activation.npy"
+        metadata_path = image_dir / f"{clean_name}_metadata.npy"
+
+        if not act_path.exists() or not metadata_path.exists():
+            raise FileNotFoundError(f"Activation files for layer {layer_name} not found")
+
+        activation = np.load(act_path)
+        metadata = np.load(metadata_path, allow_pickle=True).item()
+
+        return activation, metadata
+
+    def list_saved_images(self) -> List[str]:
+        """List all image directories in the base directory."""
+        return [d.name for d in self.base_dir.iterdir() if d.is_dir()]
+
+    def list_saved_layers(self, image_name: str) -> List[str]:
+        """List all layers saved for a specific image."""
+        image_dir = self.base_dir / image_name
+        if not image_dir.exists():
+            raise FileNotFoundError(f"No saved activations found for image {image_name}")
+
+        return [f.stem.replace('_activation', '')
+                for f in image_dir.glob('*_activation.npy')]
+
+    @staticmethod
+    def _clean_name(name: str) -> str:
+        """Clean a layer name for use in filenames."""
+        return "".join(c if c.isalnum() else "_" for c in name)

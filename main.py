@@ -5,7 +5,7 @@ from src.dimension_analysis import DimensionalityAnalyser
 from src.model import FeatureVisualizerCNN
 from src.novel_generator import NovelGenerator
 from src.trainer import ModelTrainer
-from src.activation_visualizer import ActivationVisualizer
+from src.activation_visualizer import ActivationVisualizer, ActivationSaver
 from src.utils import setup_logging, load_config, create_output_dirs
 
 
@@ -129,6 +129,9 @@ def main():
         fig_path = output_dir / 'figures' / f'feature_evolution_digit_{digit_label}.png'
         fig_evolution.savefig(fig_path)
         logger.info(f"Feature evolution visualization saved to {fig_path}")
+
+        saver = ActivationSaver(output_dir)
+        saver.save_activations(activation_vis.activations)
 
         # Get and print most activated channels
         top_channels = activation_vis.get_most_activated_channels(sample_image)
