@@ -193,8 +193,7 @@ class NovelGenerator:
         # Generate defined characters
         for num_type, symbol, img in self._generate_core():
             for _ in range(num_samples_per_class):
-                img_chinese = self.generate_number(symbol)
-                X.append(img_chinese)
+                X.append(img)
                 y.append(self.config['mappings'][num_type].index(symbol))
 
 

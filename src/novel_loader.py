@@ -23,7 +23,7 @@ class NovelDataset(Dataset):
         # Load labels
         with open(self.data_dir / label_filename, 'rb') as f:
             magic, size = struct.unpack('>II', f.read(8))
-            self.labels = np.frombuffer(f.read(), dtype=np.int64).copy()   # np.frombuffer() returns an immutable array
+            self.labels = np.frombuffer(f.read(), dtype=np.uint8).copy()   # np.frombuffer() returns an immutable array
 
         self.images = self.images.astype(np.float32) / 255.0  # Normalize to [0, 1]
 

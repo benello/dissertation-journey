@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+model_name = 'model.pth'
+
 class FeatureVisualizerCNN(nn.Module):
     """CNN model that outputs both predictions and intermediate features."""
     

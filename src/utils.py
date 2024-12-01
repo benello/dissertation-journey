@@ -29,7 +29,7 @@ def load_config(config_path):
 
 def create_output_dirs():
     """Create necessary output directories if they don't exist."""
-    dirs = ['data', 'outputs', 'outputs/figures', 'outputs/activations']
+    dirs = ['data', 'outputs', 'outputs/activations', 'outputs/figures', 'outputs/figures/novel_activations']
     for dir_name in dirs:
         Path(dir_name).mkdir(parents=True, exist_ok=True)
     return Path('outputs')

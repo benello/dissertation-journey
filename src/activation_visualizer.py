@@ -3,15 +3,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import logging
 from typing import Dict, List, Tuple
-from collections import defaultdict
 from pathlib import Path
+
+from src.activation_holder import ActivationHolder
 
 logger = logging.getLogger(__name__)
 
 class ActivationVisualizer:
     """Visualizes activations of neurons throughout the network."""
     
-    def __init__(self, model):
+    def __init__(self, model, activations: ActivationHolder):
         """
         Initialize the activation visualizer.
         
@@ -21,24 +22,7 @@ class ActivationVisualizer:
         self.model = model
         self.device = model.device
         self.model.to(self.device)
-        self.activations = defaultdict(list)
-        self._attach_hooks()
-    
-    def _attach_hooks(self):
-        """Attach forward hooks to all convolutional and ReLU layers."""
-        def hook_fn(name):
-            def hook(module, input, output):
-                self.activations[name].append(output.detach().cpu())
-            return hook
-
-        # Attach hooks to each layer we want to visualize
-        for name, module in self.model.named_modules():
-            if isinstance(module, (torch.nn.Conv2d, torch.nn.ReLU)):
-                module.register_forward_hook(hook_fn(name))
-    
-    def clear_activations(self):
-        """Clear stored activations."""
-        self.activations.clear()
+        self.activation_holder = activations
     
     def visualize_feature_evolution(self, image: torch.Tensor, digit_label: int = None,
                                   selected_channels: List[int] = None) -> plt.Figure:
@@ -54,39 +38,34 @@ class ActivationVisualizer:
             matplotlib Figure object
         """
         # Clear previous activations
-        self.clear_activations()
+        self.activation_holder.clear()
         
         # Forward pass
         self.model.eval()
         with torch.no_grad():
             _ = self.model(image.unsqueeze(0).to(self.device))
-        
-        # Filter conv layers only
-        conv_activations = {name: acts for name, acts in self.activations.items() 
-                          if 'conv' in name.lower()}
-        
+
         if selected_channels is None:
             # Default to first few channels
-            selected_channels = list(range(min(4, len(conv_activations))))
+            selected_channels = list(range(min(4, len(self.activation_holder))))
         
         # Create figure
         n_channels = len(selected_channels)
-        n_layers = len(conv_activations)
+        n_layers = len(self.activation_holder)
         fig = plt.figure(figsize=(3 * n_layers, 3 * n_channels))
         
         # Plot evolution of each selected channel
         for i, channel_idx in enumerate(selected_channels):
-            for j, (name, acts) in enumerate(conv_activations.items()):
+            for j, (name, acts) in enumerate(self.activation_holder):
                 plt.subplot(n_channels, n_layers + 1, i * (n_layers + 1) + j + 1)
                 
                 # Get activation for specific channel
                 if j == 0:  # First column shows input
-                    plt.imshow(image.squeeze().cpu(), cmap='gray')
+                    plt.imshow(image.squeeze(), cmap='gray')
                     plt.title('Input')
                 else:
-                    act = acts[0][0]  # Get first batch
-                    if channel_idx < act.shape[0]:
-                        plt.imshow(act[channel_idx].cpu(), cmap='viridis')
+                    if channel_idx < acts.shape[0]:
+                        plt.imshow(acts[channel_idx], cmap='viridis')
                         plt.title(f'{name}\nChannel {channel_idx}')
                     else:
                         plt.text(0.5, 0.5, 'Channel\nnot available',
@@ -107,7 +86,7 @@ class ActivationVisualizer:
         Returns:
             Dictionary mapping layer names to lists of (channel_idx, activation_value) tuples
         """
-        self.clear_activations()
+        self.activation_holder.clear()
         
         # Forward pass
         self.model.eval()
@@ -115,11 +94,10 @@ class ActivationVisualizer:
             _ = self.model(image.unsqueeze(0).to(self.device))
         
         results = {}
-        for name, acts in self.activations.items():
+        for name, acts in self.activation_holder:
             if 'conv' in name.lower():
-                act = acts[0][0]  # Get first batch
                 # Calculate mean activation for each channel
-                channel_means = act.mean(dim=(1, 2)).numpy()
+                channel_means = acts.mean(dim=(1, 2)).numpy()
                 # Get indices of top n_channels
                 top_channels = np.argpartition(channel_means, -n_channels)[-n_channels:]
                 # Sort by activation value
@@ -144,61 +122,54 @@ class ActivationSaver:
         """
         self.base_dir = base_dir / activations_path
 
-    def save_activations(self, activations: Dict[str, List[torch.Tensor]],
-                         image_name: str = "default"):
+    def save_activations(self, activation_holder: ActivationHolder,
+                         input_name: str = "default"):
         """
         Save activations from each layer to separate files.
 
         Args:
-            activations: Dictionary mapping layer names to activation tensors
-            image_name: Name identifier for the input image being processed
+            activation_holder: Dictionary mapping layer names to activation tensors
+            input_name: Name identifier for the inputs being processed
         """
         # Create a subdirectory for this image
-        image_dir = self.base_dir / image_name
-        image_dir.mkdir(parents=True, exist_ok=True)
+        activations_dir = self.base_dir / input_name
+        activations_dir.mkdir(parents=True, exist_ok=True)
 
         # Save activations for each layer
-        for layer_name, acts in activations.items():
+        for layer_name, acts in activation_holder:
             # Clean layer name for filename
             clean_name = self._clean_name(layer_name)
 
             # Convert activation to numpy and save
-            act_array = acts[0].numpy()  # Get first (and only) batch
+            acts_np = acts.numpy()
 
             # Save metadata about the activation
-            metadata = {
-                "layer_name": layer_name,
-                "shape": act_array.shape,
-                "mean": float(np.mean(act_array)),
-                "std": float(np.std(act_array)),
-                "max": float(np.max(act_array)),
-                "min": float(np.min(act_array))
-            }
+            metadata = activation_holder.get_metadata(layer_name)
 
             # Save both the activation array and its metadata
-            np.save(image_dir / f"{clean_name}_activation.npy", act_array)
-            np.save(image_dir / f"{clean_name}_metadata.npy", metadata)
+            np.save(activations_dir / f"{clean_name}_activation.npy", acts_np)
+            np.save(activations_dir / f"{clean_name}_metadata.npy", metadata)
 
-            logger.info(f"Saved activation for layer {layer_name} with shape {act_array.shape}")
+            logger.info(f"Saved activation for layer {layer_name} with shape {acts_np.shape}")
 
     def load_activation(self, layer_name: str,
-                        image_name: str = "default") -> Tuple[np.ndarray, Dict]:
+                        input_name: str = "default") -> Tuple[np.ndarray, Dict]:
         """
         Load activation data for a specific layer.
 
         Args:
             layer_name: Name of the layer whose activation to load
-            image_name: Name identifier of the input image
+            input_name: Name identifier of the inputs
 
         Returns:
             Tuple of (activation array, metadata dictionary)
         """
-        image_dir = self.base_dir / image_name
+        activations_dir = self.base_dir / input_name
         clean_name = self._clean_name(layer_name)
 
         # Load activation array and metadata
-        act_path = image_dir / f"{clean_name}_activation.npy"
-        metadata_path = image_dir / f"{clean_name}_metadata.npy"
+        act_path = activations_dir / f"{clean_name}_activation.npy"
+        metadata_path = activations_dir / f"{clean_name}_metadata.npy"
 
         if not act_path.exists() or not metadata_path.exists():
             raise FileNotFoundError(f"Activation files for layer {layer_name} not found")
@@ -207,19 +178,6 @@ class ActivationSaver:
         metadata = np.load(metadata_path, allow_pickle=True).item()
 
         return activation, metadata
-
-    def list_saved_images(self) -> List[str]:
-        """List all image directories in the base directory."""
-        return [d.name for d in self.base_dir.iterdir() if d.is_dir()]
-
-    def list_saved_layers(self, image_name: str) -> List[str]:
-        """List all layers saved for a specific image."""
-        image_dir = self.base_dir / image_name
-        if not image_dir.exists():
-            raise FileNotFoundError(f"No saved activations found for image {image_name}")
-
-        return [f.stem.replace('_activation', '')
-                for f in image_dir.glob('*_activation.npy')]
 
     @staticmethod
     def _clean_name(name: str) -> str:

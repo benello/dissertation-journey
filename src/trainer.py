@@ -1,9 +1,10 @@
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import logging
-from src.novel_loader import NovelDataset
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,10 @@ class ModelTrainer:
     
     def load_model(self, path):
         """Load the model from disk."""
-        checkpoint = torch.load(path)
+        if not Path(path).exists():
+            raise FileNotFoundError(f"File {path} does not exist")
+
+        checkpoint = torch.load(path, weights_only=True)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         logger.info(f"Model loaded from {path}")
@@ -124,31 +128,6 @@ class ModelTrainer:
         logger.info(f'Test set: Average loss: {test_loss:.4f}, '
                    f'Accuracy: {correct}/{len(self.test_loader.dataset)} '
                    f'({accuracy:.2f}%)')
-
-    def evaluate_novel(self, novel_data_path):
-        """Evaluate the model on novel test data."""
-        self.model.eval()
-        test_loss = 0
-        correct = 0
-
-        novel_loader = DataLoader(
-            NovelDataset(novel_data_path),
-            batch_size=self.config['batch_size'],
-            shuffle=False,
-        )
-
-        with torch.no_grad():
-            for data, target in novel_loader:
-                loss, corr = self._eval_core(data, target)
-                test_loss += loss
-                correct += corr
-
-        test_loss /= len(novel_loader)
-        accuracy = 100. * correct / len(novel_loader.dataset)
-
-        logger.info(f'Novel set: Average loss: {test_loss:.4f}, '
-                    f'Accuracy: {correct}/{len(novel_loader.dataset)} '
-                    f'({accuracy:.2f}%)')
 
     def _eval_core(self, data, target):
         data, target = data.to(self.device), target.to(self.device)
