@@ -2,17 +2,15 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Iterator
 from pathlib import Path
-
-from src.activation_holder import ActivationHolder
 
 logger = logging.getLogger(__name__)
 
 class ActivationVisualizer:
     """Visualizes activations of neurons throughout the network."""
     
-    def __init__(self, model, activations: ActivationHolder):
+    def __init__(self, model, activations):
         """
         Initialize the activation visualizer.
         
@@ -121,63 +119,42 @@ class ActivationSaver:
             base_dir: Base directory where activation files will be saved
         """
         self.base_dir = base_dir / activations_path
+        self._file_handles = {}
 
-    def save_activations(self, activation_holder: ActivationHolder,
-                         input_name: str = "default"):
-        """
-        Save activations from each layer to separate files.
+    def __enter__(self):
+        return self
 
-        Args:
-            activation_holder: Dictionary mapping layer names to activation tensors
-            input_name: Name identifier for the inputs being processed
-        """
-        # Create a subdirectory for this image
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Close all handles when done
+        for f in self._file_handles.values():
+            f.close()
+
+    def save_activations(self, activation_holder,
+                         input_name: str = 'default'):
+        """Save a batch of activations with streaming."""
         activations_dir = self.base_dir / input_name
         activations_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save activations for each layer
         for layer_name, acts in activation_holder:
-            # Clean layer name for filename
             clean_name = self._clean_name(layer_name)
-
-            # Convert activation to numpy and save
             acts_np = acts.numpy()
 
-            # Save metadata about the activation
+            # Get or create file handle
+            handle = self._file_handles.get(layer_name)
+            if handle is None:
+                activation_path = activations_dir / f"{clean_name}_activation.npy"
+                handle = self._file_handles[layer_name] = open(activation_path, 'ab')
+
+            # Save activation batch
+            np.save(handle, acts_np)
+            handle.flush()
+
+            # Update and save metadata
             metadata = activation_holder.get_metadata(layer_name)
+            metadata_path = activations_dir / f"{clean_name}_metadata.npy"
 
-            # Save both the activation array and its metadata
-            np.save(activations_dir / f"{clean_name}_activation.npy", acts_np)
-            np.save(activations_dir / f"{clean_name}_metadata.npy", metadata)
-
-            logger.info(f"Saved activation for layer {layer_name} with shape {acts_np.shape}")
-
-    def load_activation(self, layer_name: str,
-                        input_name: str = "default") -> Tuple[np.ndarray, Dict]:
-        """
-        Load activation data for a specific layer.
-
-        Args:
-            layer_name: Name of the layer whose activation to load
-            input_name: Name identifier of the inputs
-
-        Returns:
-            Tuple of (activation array, metadata dictionary)
-        """
-        activations_dir = self.base_dir / input_name
-        clean_name = self._clean_name(layer_name)
-
-        # Load activation array and metadata
-        act_path = activations_dir / f"{clean_name}_activation.npy"
-        metadata_path = activations_dir / f"{clean_name}_metadata.npy"
-
-        if not act_path.exists() or not metadata_path.exists():
-            raise FileNotFoundError(f"Activation files for layer {layer_name} not found")
-
-        activation = np.load(act_path)
-        metadata = np.load(metadata_path, allow_pickle=True).item()
-
-        return activation, metadata
+            with open(metadata_path, 'wb') as f:
+                np.save(f, metadata)
 
     @staticmethod
     def _clean_name(name: str) -> str:

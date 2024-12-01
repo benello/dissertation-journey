@@ -1,8 +1,12 @@
+from contextlib import contextmanager
+from pathlib import Path
+
 import torch
 from typing import Optional
 from collections import defaultdict
 import logging
 
+from src.activation_visualizer import ActivationSaver
 from src.model import FeatureVisualizerCNN
 
 logger = logging.getLogger(__name__)
@@ -10,10 +14,16 @@ logger = logging.getLogger(__name__)
 class ActivationHolder:
     """Holds and manages neural network layer activations with efficient storage and retrieval."""
     
-    def __init__(self, model: FeatureVisualizerCNN):
+    def __init__(self, model: FeatureVisualizerCNN, save_dir: Path):
         self._activations = defaultdict(list)
         self._metadata = {}
+
         self.hooks = []
+        self.max_batch_size = 200
+        self.current_batch_size = 0
+        self.input_name = None
+        self.saver = ActivationSaver(save_dir)
+
         self._attach_hooks(model)
 
     def __len__(self) -> int:
@@ -41,6 +51,7 @@ class ActivationHolder:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.remove_hooks()
         self.clear()
+        self.saver.__exit__(exc_type, exc_val, exc_tb)
 
     def _attach_hooks(self, model: FeatureVisualizerCNN):
         """Attach forward hooks to all convolutional and ReLU layers."""
@@ -95,6 +106,14 @@ class ActivationHolder:
             current_stats['max'] = max(current_stats['max'], float(activation.max()))
 
         logger.debug(f"Stored activation for layer {layer_name} with shape {activation.shape}")
+
+        self.current_batch_size += 1
+
+        # Check if we need to flush to disk
+        if self.current_batch_size >= self.max_batch_size:
+            self._flush_to_disk(self.input_name)
+            self._activations.clear()
+            self.current_batch_size = 0
     
     def get(self, layer_name: str, batch_idx: int = -1) -> torch.Tensor:
         """
@@ -164,3 +183,23 @@ class ActivationHolder:
             return self._metadata[layer_name]
 
         return self._metadata
+
+    @contextmanager
+    def batch_context(self, input_name: str = "default"):
+        """Context manager for handling batches of activations."""
+        self.input_name = input_name
+        try:
+            yield self
+        finally:
+            # Flush any remaining activations
+            if self.current_batch_size > 0:
+                self._flush_to_disk(input_name)
+            self._activations.clear()
+            self.input_name = None
+
+    def _flush_to_disk(self, input_name: str = "default"):
+        if input_name is None:
+            input_name = 'default'
+
+        self.saver.save_activations(self, input_name)
+        logger.debug(f"Flushed batch of size {self.current_batch_size} to disk")

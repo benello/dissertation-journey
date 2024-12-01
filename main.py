@@ -9,7 +9,7 @@ from src.model import FeatureVisualizerCNN, model_name
 from src.novel_generator import NovelGenerator
 from src.novel_loader import NovelDataset
 from src.trainer import ModelTrainer
-from src.activation_visualizer import ActivationVisualizer, ActivationSaver
+from src.activation_visualizer import ActivationVisualizer
 from src.utils import setup_logging, load_config, create_output_dirs
 
 
@@ -77,13 +77,14 @@ def main():
     # Train if requested
     if args.train:
         logger.info("Starting training phase...")
-        trainer.train()
+        with ActivationHolder(model, output_dir) as holder:
+            with holder.batch_context('training'):
+                trainer.train()
 
         # Save the activations during evaluation to disk
-        with ActivationHolder(model) as holder:
-            trainer.evaluate()
-            saver = ActivationSaver(output_dir)
-            saver.save_activations(holder, 'evaluation')
+        with ActivationHolder(model, output_dir) as holder:
+            with holder.batch_context('evaluation'):
+                trainer.evaluate()
 
         # Save trained model
         trainer.save_model(model_path)
@@ -113,8 +114,8 @@ def main():
         logger.info("Creating activation visualizations...")
 
         # Create activation visualizations
-        with ActivationHolder(model) as activation_holder:
-            activation_vis = ActivationVisualizer(model, activation_holder)
+        with ActivationHolder(model, output_dir) as holder:
+            activation_vis = ActivationVisualizer(model, holder)
 
             # Evaluate with novel data if requested
             if args.novel:
@@ -151,15 +152,12 @@ def main():
                 sample_image = sample_image[0]
                 digit_label = digit_label[0].item()
 
-            # Visualize feature evolution
-            fig_evolution = activation_vis.visualize_feature_evolution(sample_image, digit_label)
-            fig_path = output_dir / 'figures' / f'feature_evolution_digit_{digit_label}.png'
-            fig_evolution.savefig(fig_path)
-            logger.info(f"Feature evolution visualization saved to {fig_path}")
-
-            # Persist activations to disk
-            saver = ActivationSaver(output_dir)
-            saver.save_activations(activation_vis.activation_holder)
+            with holder.batch_context():
+                # Visualize feature evolution
+                fig_evolution = activation_vis.visualize_feature_evolution(sample_image, digit_label)
+                fig_path = output_dir / 'figures' / f'feature_evolution_digit_{digit_label}.png'
+                fig_evolution.savefig(fig_path)
+                logger.info(f"Feature evolution visualization saved to {fig_path}")
 
             # Get and print most activated channels
             top_channels = activation_vis.get_most_activated_channels(sample_image)
