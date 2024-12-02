@@ -1,9 +1,12 @@
+import h5py
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import logging
-from typing import Dict, List, Tuple, Iterator
+from typing import Dict, List, Tuple
 from pathlib import Path
+from numpy.lib import format
+from sympy import ceiling
 
 logger = logging.getLogger(__name__)
 
@@ -119,42 +122,80 @@ class ActivationSaver:
             base_dir: Base directory where activation files will be saved
         """
         self.base_dir = base_dir / activations_path
-        self._file_handles = {}
+        self._file_handle = None
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # Close all handles when done
-        for f in self._file_handles.values():
-            f.close()
+        if self._file_handle is not None:
+            self._file_handle.close()
 
-    def save_activations(self, activation_holder,
-                         input_name: str = 'default'):
-        """Save a batch of activations with streaming."""
+    def save_activations(self, activation_holder, input_name: str = 'default'):
+        """Save activations in chunks with proper file handling."""
         activations_dir = self.base_dir / input_name
         activations_dir.mkdir(parents=True, exist_ok=True)
+
+        h5_path = activations_dir / 'activations.h5'
+        if self._file_handle is None:
+            self._file_handle = h5py.File(h5_path, 'w')
 
         for layer_name, acts in activation_holder:
             clean_name = self._clean_name(layer_name)
             acts_np = acts.numpy()
 
-            # Get or create file handle
-            handle = self._file_handles.get(layer_name)
-            if handle is None:
-                activation_path = activations_dir / f"{clean_name}_activation.npy"
-                handle = self._file_handles[layer_name] = open(activation_path, 'ab')
+            # Create or resize dataset
+            if clean_name in self._file_handle:
+                dset = self._file_handle[clean_name]
+                current_size = dset.shape[0]
+                dset.resize((current_size + acts_np.shape[0],) + acts_np.shape[1:])
+            else:
+                maxshape = (None,) + acts_np.shape[1:]  # Allows first dimension to be expandable
+                dset = self._file_handle.create_dataset(
+                    clean_name,
+                    data=acts_np,
+                    maxshape=maxshape,
+                    chunks=True
+                )
 
-            # Save activation batch
-            np.save(handle, acts_np)
-            handle.flush()
+            # Write new data
+            if clean_name in self._file_handle:
+                current_size = dset.shape[0] - acts_np.shape[0]
+                dset[current_size:] = acts_np
 
-            # Update and save metadata
+            # Save metadata
             metadata = activation_holder.get_metadata(layer_name)
-            metadata_path = activations_dir / f"{clean_name}_metadata.npy"
+            dset.attrs['metadata'] = str(metadata)
 
-            with open(metadata_path, 'wb') as f:
-                np.save(f, metadata)
+    def load_activations(self, input_name: str = 'default', layer_name: str = None, batch_size: int = 200):
+        """Load activations in chunks with memory mapping."""
+        activations_dir = self.base_dir / input_name
+        h5_path = activations_dir / 'activations.h5'
+
+        with h5py.File(h5_path, 'r') as f:
+            clean_name = self._clean_name(layer_name)
+            # Filter layers if specified
+            layers = [clean_name] if layer_name else list(f.keys())
+
+            for layer in layers:
+                dset = f[layer]
+                total_size = dset.shape[0]
+                metadata = dset.attrs.get('metadata')
+
+                # Yield batches
+                for batch_idx in range(0, total_size, batch_size):
+                    end_idx = min(batch_idx + batch_size, total_size)
+                    yield {
+                        'layer_name': layer,
+                        'data': dset[batch_idx:end_idx],
+                        'metadata': metadata,
+                        'batch_info': {
+                            'start': batch_idx,
+                            'end': end_idx,
+                            'total': total_size
+                        }
+                    }
 
     @staticmethod
     def _clean_name(name: str) -> str:

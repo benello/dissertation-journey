@@ -1,9 +1,10 @@
+from collections import defaultdict
 from contextlib import contextmanager
 from pathlib import Path
 
+import numpy as np
 import torch
 from typing import Optional
-from collections import defaultdict
 import logging
 
 from src.activation_visualizer import ActivationSaver
@@ -90,8 +91,8 @@ class ActivationHolder:
         # Update metadata
         if layer_name not in self._metadata:
             self._metadata[layer_name] = {
-                'shape': tuple(activation.shape),
-                'dtype': str(activation.dtype),
+                'shape': np.array([0] + list(activation_cpu.shape[1:])),
+                'dtype': str(activation_cpu.dtype),
                 'mean': 0.0,
                 'std': 0.0,
                 'min': float('inf'),
@@ -100,8 +101,7 @@ class ActivationHolder:
 
         with torch.no_grad():
             current_stats = self._metadata[layer_name]
-            current_stats['mean'] += float(activation.mean())
-            current_stats['std'] += float(activation.std())
+            current_stats['shape'][0] = current_stats['shape'][0] + activation_cpu.shape[0]
             current_stats['min'] = min(current_stats['min'], float(activation.min()))
             current_stats['max'] = max(current_stats['max'], float(activation.max()))
 
@@ -114,41 +114,23 @@ class ActivationHolder:
             self._flush_to_disk(self.input_name)
             self._activations.clear()
             self.current_batch_size = 0
-    
-    def get(self, layer_name: str, batch_idx: int = -1) -> torch.Tensor:
+
+    def get(self, layer_name: str) -> torch.Tensor:
         """
         Retrieve activation for a specific layer.
         
         Args:
             layer_name: Name of the layer
-            batch_idx: Index of the batch to retrieve (-1 for latest)
 
         Returns:
             Activation tensor
         """
         if layer_name not in self._activations:
             raise KeyError(f"No activation stored for layer {layer_name}")
-            
-        activation = self._activations[layer_name][batch_idx].detach().cpu()
 
-        return activation
 
-    def get_channel(self, layer_name: str, channel_idx: int, batch_idx: int = -1) -> torch.Tensor:
-        """
-        Get activation for a specific channel in a layer.
-
-        Args:
-            layer_name: Name of the layer
-            channel_idx: Index of the channel to retrieve
-            batch_idx: Index of the batch to retrieve (-1 for latest)
-
-        Returns:
-            Channel activation tensor
-        """
-        activation = self.get(layer_name, batch_idx)
-        if channel_idx >= activation.shape[1]:
-            raise IndexError(f"Channel index {channel_idx} out of bounds for layer {layer_name}")
-        return activation[:, channel_idx]
+        flattened = torch.concat(self._activations[layer_name], dim=0)
+        return flattened.detach_().cpu()
 
     def clear(self, layer_name: Optional[str] = None) -> None:
         """

@@ -7,7 +7,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 class DimensionalityAnalyser:
     """Handles dimensionality analysis using PCA, Parallel Analysis and Kaiser-Harris criteria."""
 

@@ -9,7 +9,7 @@ from src.model import FeatureVisualizerCNN, model_name
 from src.novel_generator import NovelGenerator
 from src.novel_loader import NovelDataset
 from src.trainer import ModelTrainer
-from src.activation_visualizer import ActivationVisualizer
+from src.activation_visualizer import ActivationVisualizer, ActivationSaver
 from src.utils import setup_logging, load_config, create_output_dirs
 
 
@@ -92,6 +92,9 @@ def main():
         logger.info("Loading trained model...")
         trainer.load_model(model_path)
 
+    loader = ActivationSaver(output_dir)
+    for x in loader.load_activations('training', 'conv_layers_0'):
+        print(x)
     # Visualize if requested
     if args.visualize_dimension_analysis:
         logger.info("Creating feature visualizations...")
