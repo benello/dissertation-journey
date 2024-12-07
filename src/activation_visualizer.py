@@ -45,29 +45,34 @@ class ActivationVisualizer:
 
         if selected_channels is None:
             # Default to first few channels
-            selected_channels = list(range(min(4, len(self.activation_holder))))
+            selected_channels = list(range(min(4, 5)))
         
         # Create figure
         n_channels = len(selected_channels)
         n_layers = len(self.activation_holder)
         fig = plt.figure(figsize=(3 * n_layers, 3 * n_channels))
-        
+
         # Plot evolution of each selected channel
         for i, channel_idx in enumerate(selected_channels):
+            # Plot input image in the first column
+            plt.subplot(n_channels, n_layers + 1, i * (n_layers + 1) + 1)
+            plt.imshow(image.squeeze(), cmap='gray', vmin=0, vmax=1)
+            if i == 0:  # Only add title for the first row
+                plt.title('Input')
+            plt.axis('off')
+
+            # Plot activations for each layer starting from second column
             for j, (name, acts) in enumerate(self.activation_holder):
-                plt.subplot(n_channels, n_layers + 1, i * (n_layers + 1) + j + 1)
-                
-                # Get activation for specific channel
-                if j == 0:  # First column shows input
-                    plt.imshow(image.squeeze(), cmap='gray')
-                    plt.title('Input')
+                # Calculate the correct subplot index (j+1 because input image takes first column)
+                subplot_idx = i * (n_layers + 1) + (j + 2)
+                plt.subplot(n_channels, n_layers + 1, subplot_idx)
+
+                if channel_idx < acts.shape[0]:
+                    plt.imshow(acts[channel_idx], cmap='viridis')
+                    plt.title(f'{name}\nChannel {channel_idx}')
                 else:
-                    if channel_idx < acts.shape[0]:
-                        plt.imshow(acts[channel_idx], cmap='viridis')
-                        plt.title(f'{name}\nChannel {channel_idx}')
-                    else:
-                        plt.text(0.5, 0.5, 'Channel\nnot available',
-                                ha='center', va='center')
+                    plt.text(0.5, 0.5, 'Channel\nnot available',
+                             ha='center', va='center')
                 plt.axis('off')
         
         plt.tight_layout()

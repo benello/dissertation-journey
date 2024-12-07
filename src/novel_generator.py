@@ -161,6 +161,15 @@ class NovelGenerator:
 
         return np.array(img)
 
+    def generate_misc(self, type: str):
+        """Generates an empty or filled image"""
+        img = self.create_base_image()
+
+        if type == 'filled':
+            return ~np.array(img)
+        else:
+            return np.array(img)
+
     def save_example_images(self):
         """Save images for each alternative representation."""
         example_dir = self.output_dir / 'examples'
@@ -168,7 +177,9 @@ class NovelGenerator:
 
         # Generate and save number
         for num_type, symbol, img in self._generate_core():
-            Image.fromarray(img).save(example_dir / f"{num_type}_{symbol}.png", format='PNG')
+            pil_img = Image.fromarray(img)
+            pil_img.save(example_dir / f"{num_type}_{symbol}.png", format='PNG')
+            pil_img.close()
 
     def save_dataset_to_mnist(self):
         """Save to MNIST format."""
@@ -202,14 +213,17 @@ class NovelGenerator:
     def _generate_core(self):
         # Generate and save symbols
         for num_type, symbols in self.config['mappings'].items():
-            if num_type == 'dots':
-                img_generator = self.generate_dot_pattern
-            else:
-                img_generator = self.generate_number
+            match num_type:
+                case 'dots':
+                    img_generator = self.generate_dot_pattern
+                case 'misc':
+                    img_generator = self.generate_misc
+                case _:
+                    img_generator = self.generate_number
 
             for symbol in symbols:
                 # Defined character representation
-                yield num_type, str(symbol), img_generator(symbol)
+                yield num_type, symbol, img_generator(symbol)
 
     def _save_mnist_images(self, images):
         """Save MNIST image format to disk."""

@@ -77,9 +77,7 @@ def main():
     # Train if requested
     if args.train:
         logger.info("Starting training phase...")
-        with ActivationHolder(model, output_dir) as holder:
-            with holder.batch_context('training'):
-                trainer.train()
+        trainer.train()
 
         # Save the activations during evaluation to disk
         with ActivationHolder(model, output_dir) as holder:

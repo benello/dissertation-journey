@@ -62,10 +62,15 @@ class ActivationHolder:
             return hook
 
         # Attach hooks to each layer we want to visualize
+        t = model.named_modules()
         for name, module in model.named_modules():
-            if isinstance(module, (torch.nn.Conv2d, torch.nn.ReLU)):
+            if isinstance(module, torch.nn.Conv2d):
                 handle = module.register_forward_hook(hook_fn(name))
                 self.hooks.append(handle)
+            if isinstance(module, torch.nn.ReLU):
+                handle = module.register_forward_hook(hook_fn(f'{name}-relu'))
+                self.hooks.append(handle)
+
 
     def remove_hooks(self):
         """Remove all hooks."""
@@ -114,7 +119,7 @@ class ActivationHolder:
             self._flush_to_disk(self.input_name)
             self._activations.clear()
             self.current_batch_size = 0
-    
+
     def get(self, layer_name: str, batch_idx: int = -1) -> torch.Tensor:
         """
         Retrieve activation for a specific layer.
