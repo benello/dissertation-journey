@@ -1,57 +1,53 @@
+import multiprocessing
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
 import torch
 import logging
+
+from torch import nn
+from tqdm import tqdm
+from joblib import Parallel, delayed
+
+from src.activation_tracking import ActivationTracker
 
 logger = logging.getLogger(__name__)
 
 
 class DimensionalityAnalyser:
-    """Handles dimensionality analysis using PCA, Parallel Analysis and Kaiser-Harris criteria."""
-
     def __init__(self, model, data_loader, config):
-        """
-                Initialize the unified analyzer.
-
-                Args:
-                    model: Trained neural network model
-                    data_loader: DataLoader for feature extraction
-                    config: Configuration dictionary
-                """
-        # Feature visualization attributes
         self.model = model
         self.data_loader = data_loader
         self.config = config['visualization']
         self.device = model.device
-
-        # Shared attributes
         self.labels = None
         self.features = None
 
     def collect_features(self):
-        """Collect features from the model's intermediate layer."""
-        logger.info("Collecting features...")
-        self.model.eval()
-        features_list = []
+        """Example of using tracker for feature collection."""
+        tracker = ActivationTracker("outputs")
+        tracker.set_layers_to_track([nn.Conv2d, nn.ReLU])
+
         labels_list = []
         samples_collected = 0
 
-        with torch.no_grad():
+        with torch.no_grad(), tracker.track(self.model, 'collect_features') as tracked_model:
             for data, target in self.data_loader:
                 if samples_collected >= self.config['num_samples']:
                     break
 
-                data = data.to(self.device)
-                _, features = self.model(data)
-                features_list.append(features.cpu().numpy())
+                _ = tracked_model(data.to(self.device))
                 labels_list.append(target.numpy())
                 samples_collected += data.size(0)
 
-        self.features = np.vstack(features_list)
-        self.labels = np.concatenate(labels_list)
-        logger.info(f"Collected {len(self.features)} samples")
+            # Get and process features
+            features = tracker.get_activations('conv_layers.0')
+            features = features.reshape(features.size(0), -1)
+            labels = np.concatenate(labels_list)
+
+            return features, labels
 
     def parallel_analysis(self):
         """
@@ -63,23 +59,21 @@ class DimensionalityAnalyser:
         if self.features is None:
             raise ValueError("Features not collected. Call collect_features() first.")
 
-        n_samples, n_features = self.features.shape
+        n_samples, _ = self.features.shape
+        logger.info(f"Running parallel analysis with {self.config['iterations']} iterations...")
 
         # Calculate eigenvalues of actual data
-        pca = PCA(n_components=n_features)
+        pca = PCA(n_components=n_samples)
         pca.fit(self.features)
         actual_eigenvalues = pca.explained_variance_
-
         # Generate random eigenvalues
-        random_eigenvalues = np.zeros((self.config['iterations'], n_features))
-        for i in range(self.config['iterations']):
-            random_data = np.random.normal(size=(n_samples, n_features))
-            pca.fit(random_data)
-            random_eigenvalues[i, :] = pca.explained_variance_
+        pa = ParallelAnalysis(self.config['iterations'], n_jobs=4)
+        threshold_eigenvalues = pa.fit(self.features)
 
-        threshold_eigenvalues = np.percentile(random_eigenvalues, self.config['percentile'], axis=0)
+        # Determine number of components to retain
         n_components = sum(actual_eigenvalues > threshold_eigenvalues)
 
+        logger.info(f"Parallel Analysis suggests {n_components} components")
         return n_components, actual_eigenvalues, threshold_eigenvalues
 
     def kaiser_harris(self):
@@ -92,11 +86,15 @@ class DimensionalityAnalyser:
         if self.features is None:
             raise ValueError("Features not collected. Call collect_features() first.")
 
-        pca = PCA(n_components=self.features.shape[1])
+        n_samples, _ = self.features.shape
+
+        # Perform PCA
+        pca = PCA(n_components=n_samples)
         pca.fit(self.features)
         eigenvalues = pca.explained_variance_
         n_components = sum(eigenvalues > 1.0)
 
+        logger.info(f"Kaiser-Harris criterion suggests {n_components} components")
         return n_components, eigenvalues
 
     def analyze_dimensionality(self):
@@ -104,7 +102,7 @@ class DimensionalityAnalyser:
         Perform comprehensive dimensionality analysis using multiple methods.
 
         Returns:
-            dict: Dictionary containing analysis results
+            dict: Dictionary containing analysis results and recommended dimensions
         """
         # Perform parallel analysis
         pa_components, actual_eig, random_eig = self.parallel_analysis()
@@ -112,127 +110,128 @@ class DimensionalityAnalyser:
         # Perform Kaiser-Harris analysis
         kh_components, kh_eig = self.kaiser_harris()
 
+        # Calculate PCA explained variance for comparison
+        pca = PCA()
+        pca.fit(self.features)
+        explained_variance_ratio = pca.explained_variance_ratio_
+        cumulative_variance = np.cumsum(explained_variance_ratio)
+
+        # Number of components for different variance thresholds
+        variance_components = {
+            '90%': len([x for x in cumulative_variance if x <= 0.9]) + 1,
+            '95%': len([x for x in cumulative_variance if x <= 0.95]) + 1,
+            '99%': len([x for x in cumulative_variance if x <= 0.99]) + 1
+        }
+
         return {
             'pa_components': pa_components,
             'kh_components': kh_components,
             'actual_eigenvalues': actual_eig,
             'random_eigenvalues': random_eig,
-            'kh_eigenvalues': kh_eig
+            'kh_eigenvalues': kh_eig,
+            'explained_variance_ratio': explained_variance_ratio,
+            'cumulative_variance': cumulative_variance,
+            'variance_components': variance_components
         }
 
-    def visualize(self):
+    def visualize_analysis(self, results):
         """
-        Create comprehensive visualizations including PCA, t-SNE, and dimensionality analysis.
-
-        Returns:
-            tuple: (fig_pca, fig_analysis) containing the matplotlib figures
-        """
-        if self.features is None:
-            raise ValueError("Features not collected. Call collect_features() first.")
-
-        # Perform PCA
-        pca = PCA()
-        features_pca = pca.fit_transform(self.features)
-
-        # Get dimensionality analysis results
-        analysis_results = self.analyze_dimensionality()
-
-        # Create PCA visualization figure
-        fig_pca = plt.figure(figsize=tuple(self.config['fig_size']))
-
-        # Plot 1: Explained variance ratio
-        plt.subplot(1, 3, 1)
-        cumulative_var = np.cumsum(pca.explained_variance_ratio_)
-        components = range(1, len(pca.explained_variance_ratio_) + 1)
-
-        plt.plot(components, cumulative_var, 'bo-')
-        plt.xlabel('Number of Components')
-        plt.ylabel('Cumulative Explained Variance')
-        plt.title('PCA Explained Variance')
-        plt.grid(True)
-
-        # Plot 2: First two PCA components
-        plt.subplot(1, 3, 2)
-        scatter = plt.scatter(
-            features_pca[:, 0],
-            features_pca[:, 1],
-            c=self.labels,
-            cmap='tab10',
-            alpha=0.6
-        )
-        plt.xlabel('First PCA Component')
-        plt.ylabel('Second PCA Component')
-        plt.title('PCA Components Visualization')
-        plt.colorbar(scatter, label='Class')
-
-        # Plot 3: t-SNE visualization
-        plt.subplot(1, 3, 3)
-        tsne = TSNE(n_components=2, random_state=42)
-        features_tsne = tsne.fit_transform(self.features)
-        scatter_tsne = plt.scatter(
-            features_tsne[:, 0],
-            features_tsne[:, 1],
-            c=self.labels,
-            cmap='tab10',
-            alpha=0.6
-        )
-        plt.xlabel('First t-SNE Component')
-        plt.ylabel('Second t-SNE Component')
-        plt.title('t-SNE Visualization')
-        plt.colorbar(scatter_tsne, label='Class')
-
-        plt.tight_layout()
-
-        # Create dimensionality analysis figure
-        fig_analysis = plt.figure(figsize=tuple(self.config['fig_size']))
-
-        # Plot eigenvalues and thresholds
-        components = range(1, len(analysis_results['actual_eigenvalues']) + 1)
-        plt.plot(components, analysis_results['actual_eigenvalues'], 'b-',
-                 label='Actual Data')
-        plt.plot(components, analysis_results['random_eigenvalues'], 'r--',
-                 label='Parallel Analysis Threshold')
-        plt.axhline(y=1.0, color='g', linestyle='--',
-                    label='Kaiser-Harris Threshold')
-
-        plt.xlabel('Component Number')
-        plt.ylabel('Eigenvalue')
-        plt.title('Dimensionality Analysis')
-        plt.legend()
-        plt.grid(True)
-
-        # Add vertical lines for recommended components
-        plt.axvline(x=analysis_results['pa_components'], color='r', alpha=0.3,
-                    label='PA cutoff')
-        plt.axvline(x=analysis_results['kh_components'], color='g', alpha=0.3,
-                    label='KH cutoff')
-
-        plt.tight_layout()
-
-        # Print PCA statistics
-        logger.info("\nAnalysis Summary:")
-        logger.info(f"Total explained variance: {sum(pca.explained_variance_ratio_):.4f}")
-        logger.info(f"Number of components for 90% variance: "
-                    f"{len([x for x in cumulative_var if x <= 0.9]) + 1}")
-        logger.info(f"PA recommended components: {analysis_results['pa_components']}")
-        logger.info(f"KH recommended components: {analysis_results['kh_components']}")
-
-        return fig_pca, fig_analysis
-
-    def save_visualizations(self, output_dir):
-        """
-        Save all visualizations to files.
+        Create comprehensive visualization of dimensionality analysis results.
 
         Args:
-            output_dir (str): Directory to save the visualization files
+            results: Dictionary containing analysis results from analyze_dimensionality()
         """
-        fig_pca, fig_analysis = self.visualize()
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
-        # Save PCA and t-SNE visualizations
-        fig_pca.savefig(f"{output_dir}/feature_visualization.png")
+        # Plot 1: Eigenvalue comparison
+        components = range(1, len(results['actual_eigenvalues']) + 1)
+        ax1.plot(components, results['actual_eigenvalues'], 'b-',
+                 label='Actual Data', linewidth=2)
+        ax1.plot(components, results['random_eigenvalues'], 'r--',
+                 label='PA Threshold', linewidth=1.5)
+        ax1.axhline(y=1.0, color='g', linestyle='--',
+                    label='Kaiser-Harris Threshold', linewidth=1.5)
 
-        # Save dimensionality analysis
-        fig_analysis.savefig(f"{output_dir}/dimensionality_analysis.png")
+        # Add vertical lines for recommended components
+        ax1.axvline(x=results['pa_components'], color='r', alpha=0.3,
+                    label=f'PA cutoff ({results["pa_components"]})')
+        ax1.axvline(x=results['kh_components'], color='g', alpha=0.3,
+                    label=f'KH cutoff ({results["kh_components"]})')
 
-        plt.close('all')
-        logger.info(f"Saved visualizations to {output_dir}")
+        ax1.set_xlabel('Component Number')
+        ax1.set_ylabel('Eigenvalue')
+        ax1.set_title('Dimensionality Analysis: Eigenvalue Comparison')
+        ax1.legend()
+        ax1.grid(True)
+
+        # Plot 2: Cumulative explained variance
+        components = range(1, len(results['explained_variance_ratio']) + 1)
+        ax2.plot(components, results['cumulative_variance'], 'b-', linewidth=2)
+
+        # Add markers for variance thresholds
+        for threshold, n_comp in results['variance_components'].items():
+            ax2.axvline(x=n_comp, color='r', alpha=0.3,
+                        label=f'{threshold} var ({n_comp} components)')
+
+        ax2.set_xlabel('Number of Components')
+        ax2.set_ylabel('Cumulative Explained Variance')
+        ax2.set_title('PCA Explained Variance')
+        ax2.legend()
+        ax2.grid(True)
+
+        plt.tight_layout()
+        return fig
+
+    def run_analysis(self):
+        """Run complete dimensionality analysis and save results."""
+        # Ensure features are collected
+        if self.features is None:
+            self.features, self.labels = self.collect_features()
+
+        # Run analysis
+        results = self.analyze_dimensionality()
+
+        # Create visualization
+        fig = self.visualize_analysis(results)
+
+        return results, fig
+
+
+class ParallelAnalysis:
+    def __init__(self, n_iterations=100, n_jobs=multiprocessing.cpu_count()):
+        self.n_iterations = n_iterations
+        self.n_jobs = n_jobs
+
+    def _single_iteration(self, data_shape, random_seed=None):
+        """Run a single iteration of parallel analysis"""
+        if random_seed is not None:
+            np.random.seed(random_seed)
+
+        # Generate random normal data
+        random_data = np.random.normal(size=data_shape)
+
+        # Fit PCA and return eigenvalues
+        pca = PCA(n_components=min(data_shape))
+        pca.fit(random_data)
+        return pca.explained_variance_
+
+    def fit(self, features):
+        """Run parallel analysis with parallel processing"""
+        data_shape = features.shape
+
+        # Generate random seeds for reproducibility
+        random_seeds = np.random.randint(0, np.iinfo(np.int32).max, size=self.n_iterations)
+
+        # Run iterations in parallel
+        random_eigenvalues = Parallel(n_jobs=self.n_jobs)(
+            delayed(self._single_iteration)(data_shape, seed)
+            for seed in tqdm(random_seeds, desc="Running PA iterations")
+        )
+
+        # Stack results
+        random_eigenvalues = np.array(random_eigenvalues)
+
+        # Calculate percentiles
+        eigenvalue_95 = np.percentile(random_eigenvalues, 95, axis=0)
+
+        return eigenvalue_95

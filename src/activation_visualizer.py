@@ -2,15 +2,19 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import logging
-from typing import Dict, List, Tuple, Iterator
+from typing import Dict, List, Tuple
 from pathlib import Path
+
+from torch import nn
+
+from src.activation_tracking import ActivationTracker
 
 logger = logging.getLogger(__name__)
 
 class ActivationVisualizer:
     """Visualizes activations of neurons throughout the network."""
     
-    def __init__(self, model, activations):
+    def __init__(self, model):
         """
         Initialize the activation visualizer.
         
@@ -20,7 +24,8 @@ class ActivationVisualizer:
         self.model = model
         self.device = model.device
         self.model.to(self.device)
-        self.activation_holder = activations
+        self.tracker = ActivationTracker('outputs')
+        self.tracker.set_layers_to_track([nn.Conv2d, nn.ReLU])
     
     def visualize_feature_evolution(self, image: torch.Tensor, digit_label: int = None,
                                   selected_channels: List[int] = None) -> plt.Figure:
@@ -36,12 +41,12 @@ class ActivationVisualizer:
             matplotlib Figure object
         """
         # Clear previous activations
-        self.activation_holder.clear()
+        self.tracker.clear()
         
         # Forward pass
-        self.model.eval()
-        with torch.no_grad():
-            _ = self.model(image.unsqueeze(0).to(self.device))
+        with torch.no_grad(), self.tracker.track(self.model, None, False) as tracked_model:
+            tracked_model.eval()
+            _ = tracked_model(image.unsqueeze(0).to(self.device))
 
         if selected_channels is None:
             # Default to first few channels
@@ -49,7 +54,7 @@ class ActivationVisualizer:
         
         # Create figure
         n_channels = len(selected_channels)
-        n_layers = len(self.activation_holder)
+        n_layers = len(self.tracker)
         fig = plt.figure(figsize=(3 * n_layers, 3 * n_channels))
 
         # Plot evolution of each selected channel
@@ -62,8 +67,9 @@ class ActivationVisualizer:
             plt.axis('off')
 
             # Plot activations for each layer starting from second column
-            for j, (name, acts) in enumerate(self.activation_holder):
+            for j, (name, acts) in enumerate(self.tracker):
                 # Calculate the correct subplot index (j+1 because input image takes first column)
+                acts = acts.squeeze()   # Only one image is being processed so remove extra dimension
                 subplot_idx = i * (n_layers + 1) + (j + 2)
                 plt.subplot(n_channels, n_layers + 1, subplot_idx)
 
@@ -89,18 +95,18 @@ class ActivationVisualizer:
         Returns:
             Dictionary mapping layer names to lists of (channel_idx, activation_value) tuples
         """
-        self.activation_holder.clear()
+        self.tracker.clear()
         
         # Forward pass
         self.model.eval()
-        with torch.no_grad():
-            _ = self.model(image.unsqueeze(0).to(self.device))
+        with torch.no_grad(), self.tracker.track(self.model, None, False) as tracked_model:
+            _ = tracked_model(image.unsqueeze(0).to(self.device))
         
         results = {}
-        for name, acts in self.activation_holder:
+        for name, acts in self.tracker:
             if 'conv' in name.lower():
                 # Calculate mean activation for each channel
-                channel_means = acts.mean(dim=(1, 2)).numpy()
+                channel_means = acts.mean(dim=(2, 3)).numpy().squeeze()
                 # Get indices of top n_channels
                 top_channels = np.argpartition(channel_means, -n_channels)[-n_channels:]
                 # Sort by activation value
@@ -110,58 +116,3 @@ class ActivationVisualizer:
                 results[name] = top_channels
         
         return results
-
-activations_path = 'activations'
-
-class ActivationSaver:
-    """Handles saving and loading of neural network activations."""
-
-    def __init__(self, base_dir: Path):
-        """
-        Initialize the activation saver.
-
-        Args:
-            base_dir: Base directory where activation files will be saved
-        """
-        self.base_dir = base_dir / activations_path
-        self._file_handles = {}
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        # Close all handles when done
-        for f in self._file_handles.values():
-            f.close()
-
-    def save_activations(self, activation_holder,
-                         input_name: str = 'default'):
-        """Save a batch of activations with streaming."""
-        activations_dir = self.base_dir / input_name
-        activations_dir.mkdir(parents=True, exist_ok=True)
-
-        for layer_name, acts in activation_holder:
-            clean_name = self._clean_name(layer_name)
-            acts_np = acts.numpy()
-
-            # Get or create file handle
-            handle = self._file_handles.get(layer_name)
-            if handle is None:
-                activation_path = activations_dir / f"{clean_name}_activation.npy"
-                handle = self._file_handles[layer_name] = open(activation_path, 'ab')
-
-            # Save activation batch
-            np.save(handle, acts_np)
-            handle.flush()
-
-            # Update and save metadata
-            metadata = activation_holder.get_metadata(layer_name)
-            metadata_path = activations_dir / f"{clean_name}_metadata.npy"
-
-            with open(metadata_path, 'wb') as f:
-                np.save(f, metadata)
-
-    @staticmethod
-    def _clean_name(name: str) -> str:
-        """Clean a layer name for use in filenames."""
-        return "".join(c if c.isalnum() else "_" for c in name)
