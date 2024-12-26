@@ -1,6 +1,7 @@
 import argparse
 import logging
 
+import torch
 from matplotlib import pyplot as plt
 from torch import nn
 
@@ -83,8 +84,8 @@ def main():
         # Save the activations during evaluation to disk
         tracker = ActivationTracker(output_dir)
         tracker.set_layers_to_track([nn.Conv2d, nn.ReLU])
-        with tracker.track(model, 'evaluation') as tracked_model:
-            tracked_model.evaluate()
+        with tracker.track(model, 'evaluation'):
+            trainer.evaluate()
 
         # Save trained model
         trainer.save_model(model_path)
