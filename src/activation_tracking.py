@@ -14,7 +14,7 @@ activations_path = 'activations'
 class ActivationTracker:
     """Simple activation tracking system"""
 
-    def __init__(self, base_dir, batch_size=1024):
+    def __init__(self, base_dir, batch_size=10):
         self.save_dir = Path(base_dir) / activations_path
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -51,7 +51,6 @@ class ActivationTracker:
             # Store tensor directly after detaching and moving to CPU
             tensor = output.detach().cpu()
             self.activations[layer_name].append(tensor)
-
             # save if batch size is reached
             if len(self.activations[layer_name]) >= self.batch_size:
                 self._save_batch()

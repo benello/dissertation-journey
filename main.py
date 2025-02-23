@@ -157,9 +157,9 @@ def main():
 
         # Visualize feature evolution
         fig_evolution = activation_vis.visualize_feature_evolution(sample_image, digit_label)
-        test = activation_vis.visualize_inactive_channels(sample_image)
-        test.savefig(output_dir / 'figures' / 'empty_activations.png')
-        test.clear()
+        inactive_fig = activation_vis.visualize_inactive_channels(sample_image)
+        inactive_fig.savefig(output_dir / 'figures' / 'empty_activations.png')
+        inactive_fig.clear()
         analysis_path = output_dir / 'figures' / f'feature_evolution_digit_{digit_label}.png'
         fig_evolution.savefig(analysis_path)
         logger.info(f"Feature evolution visualization saved to {analysis_path}")
