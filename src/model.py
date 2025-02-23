@@ -26,10 +26,12 @@ class FeatureVisualizerCNN(nn.Module):
             layers.extend([
                 nn.Conv2d(in_channels, out_channels, kernel_size),  # size of feature map - size = (input_size - kernel_size + 2*padding)/stride + 1
                 nn.ReLU(),
+                nn.Dropout(0.5),
             ])
             in_channels = out_channels
         
         layers.extend([
+            nn.Dropout(0.5),
             nn.AdaptiveAvgPool2d((1, 1)),   # Reduces spatial dimensions from final 22x22 to 1x1. Effectively getting the average of the whole feature map
             nn.Flatten()    # Converts to 2D
         ])

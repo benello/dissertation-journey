@@ -83,8 +83,8 @@ def main():
         # Save the activations during evaluation to disk
         tracker = ActivationTracker(output_dir)
         tracker.set_layers_to_track([nn.Conv2d, nn.ReLU])
-        with tracker.track(model, 'evaluation') as tracked_model:
-            tracked_model.evaluate()
+        with tracker.track(model, 'evaluation') as _:
+            trainer.evaluate()
 
         # Save trained model
         trainer.save_model(model_path)
@@ -92,10 +92,14 @@ def main():
         logger.info("Loading trained model...")
         trainer.load_model(model_path)
 
+    novel_generator = NovelGenerator(config)
+    novel_generator.save_example_images()
+    novel_generator.save_dataset_to_mnist()
+
     # Visualize if requested
     if args.visualize_dimension_analysis:
         logger.info("Creating feature visualizations...")
-        dimension_analyser = DimensionalityAnalyser(model, trainer.train_loader, config)
+        dimension_analyser = DimensionalityAnalyser(model, trainer.test_loader, config)
         results, fig_analysis = dimension_analyser.run_analysis()
 
         # Save pca visualization
@@ -148,8 +152,14 @@ def main():
             sample_image = sample_image[0]
             digit_label = digit_label[0].item()
 
+        # Add a batch dimension
+        sample_image = sample_image.unsqueeze(0)
+
         # Visualize feature evolution
         fig_evolution = activation_vis.visualize_feature_evolution(sample_image, digit_label)
+        test = activation_vis.visualize_inactive_channels(sample_image)
+        test.savefig(output_dir / 'figures' / 'empty_activations.png')
+        test.clear()
         analysis_path = output_dir / 'figures' / f'feature_evolution_digit_{digit_label}.png'
         fig_evolution.savefig(analysis_path)
         logger.info(f"Feature evolution visualization saved to {analysis_path}")

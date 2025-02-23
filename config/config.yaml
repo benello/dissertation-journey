@@ -15,8 +15,6 @@ model:
 visualization:
   num_samples: 1000
   fig_size: [15, 5]
-  tsne_perplexity: 30
-  tsne_random_state: 42
   iterations: 500
   percentile: 95
 

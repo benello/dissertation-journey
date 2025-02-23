@@ -38,6 +38,6 @@ class NovelDataset(Dataset):
         image = torch.from_numpy(image)
 
         # Add channel dimension
-        image = image.unsqueeze(0)  # Shape becomes [1, H, W]
+        image = image.unsqueeze(0).unsqueeze(0)  # Shape becomes [1, H, W]
 
         return image, label

@@ -1,5 +1,4 @@
 import multiprocessing
-from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,58 +16,51 @@ logger = logging.getLogger(__name__)
 
 
 class DimensionalityAnalyser:
-    def __init__(self, model, data_loader, config):
+    def __init__(self, model, mnist_loader, config):
         self.model = model
-        self.data_loader = data_loader
+        self.mnist_loader = mnist_loader
         self.config = config['visualization']
         self.device = model.device
-        self.labels = None
-        self.features = None
 
-    def collect_features(self):
-        """Example of using tracker for feature collection."""
+    def collect_features(self, data_loader, dataset_name):
+        """Modified to return features and labels separately"""
         tracker = ActivationTracker("outputs")
         tracker.set_layers_to_track([nn.Conv2d, nn.ReLU])
 
         labels_list = []
         samples_collected = 0
 
-        with torch.no_grad(), tracker.track(self.model, 'collect_features') as tracked_model:
-            for data, target in self.data_loader:
+        with torch.no_grad(), tracker.track(self.model, f'collect_features{dataset_name}') as tracked_model:
+            for data, target in data_loader:
                 if samples_collected >= self.config['num_samples']:
                     break
 
                 _ = tracked_model(data.to(self.device))
-                labels_list.append(target.numpy())
                 samples_collected += data.size(0)
 
             # Get and process features
             features = tracker.get_activations('conv_layers.0')
-            features = features.reshape(features.size(0), -1)
-            labels = np.concatenate(labels_list)
+            features = features.reshape(features.size(0), -1).cpu().numpy()
 
-            return features, labels
+            return features, labels_list
 
-    def parallel_analysis(self):
+    def parallel_analysis(self, features):
         """
         Perform parallel analysis to determine number of components to retain.
 
         Returns:
             tuple: (n_components, actual_eigenvalues, threshold_eigenvalues)
         """
-        if self.features is None:
-            raise ValueError("Features not collected. Call collect_features() first.")
-
-        n_samples, _ = self.features.shape
+        n_samples, _ = features.shape
         logger.info(f"Running parallel analysis with {self.config['iterations']} iterations...")
 
         # Calculate eigenvalues of actual data
         pca = PCA(n_components=n_samples)
-        pca.fit(self.features)
+        pca.fit(features)
         actual_eigenvalues = pca.explained_variance_
         # Generate random eigenvalues
         pa = ParallelAnalysis(self.config['iterations'], n_jobs=4)
-        threshold_eigenvalues = pa.fit(self.features)
+        threshold_eigenvalues = pa.fit(features)
 
         # Determine number of components to retain
         n_components = sum(actual_eigenvalues > threshold_eigenvalues)
@@ -76,28 +68,25 @@ class DimensionalityAnalyser:
         logger.info(f"Parallel Analysis suggests {n_components} components")
         return n_components, actual_eigenvalues, threshold_eigenvalues
 
-    def kaiser_harris(self):
+    def kaiser_harris(self, features):
         """
         Apply Kaiser-Harris criterion to determine number of components.
 
         Returns:
             tuple: (n_components, eigenvalues)
         """
-        if self.features is None:
-            raise ValueError("Features not collected. Call collect_features() first.")
-
-        n_samples, _ = self.features.shape
+        n_samples, _ = features.shape
 
         # Perform PCA
         pca = PCA(n_components=n_samples)
-        pca.fit(self.features)
+        pca.fit(features)
         eigenvalues = pca.explained_variance_
         n_components = sum(eigenvalues > 1.0)
 
         logger.info(f"Kaiser-Harris criterion suggests {n_components} components")
         return n_components, eigenvalues
 
-    def analyze_dimensionality(self):
+    def analyze_dimensionality(self, features):
         """
         Perform comprehensive dimensionality analysis using multiple methods.
 
@@ -105,14 +94,14 @@ class DimensionalityAnalyser:
             dict: Dictionary containing analysis results and recommended dimensions
         """
         # Perform parallel analysis
-        pa_components, actual_eig, random_eig = self.parallel_analysis()
+        pa_components, actual_eig, random_eig = self.parallel_analysis(features)
 
         # Perform Kaiser-Harris analysis
-        kh_components, kh_eig = self.kaiser_harris()
+        kh_components, kh_eig = self.kaiser_harris(features)
 
         # Calculate PCA explained variance for comparison
         pca = PCA()
-        pca.fit(self.features)
+        pca.fit(features)
         explained_variance_ratio = pca.explained_variance_ratio_
         cumulative_variance = np.cumsum(explained_variance_ratio)
 
@@ -184,18 +173,21 @@ class DimensionalityAnalyser:
 
     def run_analysis(self):
         """Run complete dimensionality analysis and save results."""
-        # Ensure features are collected
-        if self.features is None:
-            self.features, self.labels = self.collect_features()
+        features_mnist, _ = self.collect_features(self.mnist_loader, 'mnist')
 
-        # Run analysis
-        results = self.analyze_dimensionality()
+        # Run standard dimensionality analysis on MNIST features
+        dim_results = self.analyze_dimensionality(features_mnist)
+        fig = self.visualize_analysis(dim_results)
 
-        # Create visualization
-        fig = self.visualize_analysis(results)
+        combined_results = {
+            'dimensionality_analysis': {
+                'pa_components': dim_results['pa_components'],
+                'kh_components': dim_results['kh_components'],
+                'variance_components': dim_results['variance_components']
+            },
+        }
 
-        return results, fig
-
+        return combined_results, fig
 
 class ParallelAnalysis:
     def __init__(self, n_iterations=100, n_jobs=multiprocessing.cpu_count()):
