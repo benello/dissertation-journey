@@ -5,6 +5,15 @@ training:
   learning_rate: 0.001
   device: 'cuda'  # will fall back to 'cpu' if cuda not available
 
+# Tracking parameters
+tracker:
+  probe_layers: ['conv_layers.2']
+
+# Activation Analysis Distance parameters
+analysis:
+  pca_n_components: 113
+  k_neighbour: 13
+
 # Model architecture
 model:
   conv_channels: [32, 62, 62]
@@ -13,7 +22,7 @@ model:
 
 # Visualization
 visualization:
-  num_samples: 1000
+  num_samples: 10000
   fig_size: [15, 5]
   iterations: 500
   percentile: 95

@@ -2,11 +2,10 @@ import multiprocessing
 
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, IncrementalPCA
 import torch
 import logging
 
-from torch import nn
 from tqdm import tqdm
 from joblib import Parallel, delayed
 
@@ -16,21 +15,19 @@ logger = logging.getLogger(__name__)
 
 
 class DimensionalityAnalyser:
-    def __init__(self, model, mnist_loader, config):
+    def __init__(self, model, config):
         self.model = model
-        self.mnist_loader = mnist_loader
         self.config = config['visualization']
         self.device = model.device
 
-    def collect_features(self, data_loader, dataset_name):
-        """Modified to return features and labels separately"""
-        tracker = ActivationTracker("outputs")
-        tracker.set_layers_to_track([nn.Conv2d, nn.ReLU])
+    def collect_features(self, data_loader, dataset_name, config):
+        """Return features and labels"""
+        tracker = ActivationTracker("outputs", config)
 
         labels_list = []
         samples_collected = 0
 
-        with torch.no_grad(), tracker.track(self.model, f'collect_features{dataset_name}') as tracked_model:
+        with torch.no_grad(), tracker.track(self.model, f'collect_features_{dataset_name}') as tracked_model:
             for data, target in data_loader:
                 if samples_collected >= self.config['num_samples']:
                     break
@@ -38,29 +35,30 @@ class DimensionalityAnalyser:
                 _ = tracked_model(data.to(self.device))
                 samples_collected += data.size(0)
 
-            # Get and process features
-            features = tracker.get_activations('conv_layers.0')
-            features = features.reshape(features.size(0), -1).cpu().numpy()
+                labels_list.append(target)
 
-            return features, labels_list
+        return tracker, torch.cat(labels_list, dim=0)
 
-    def parallel_analysis(self, features):
+    def parallel_analysis(self, tracker):
         """
         Perform parallel analysis to determine number of components to retain.
 
         Returns:
             tuple: (n_components, actual_eigenvalues, threshold_eigenvalues)
         """
-        n_samples, _ = features.shape
         logger.info(f"Running parallel analysis with {self.config['iterations']} iterations...")
 
         # Calculate eigenvalues of actual data
-        pca = PCA(n_components=n_samples)
-        pca.fit(features)
+        pca = IncrementalPCA()
+
+        for batch in tracker.get_activations(None):
+            feature_batch = batch.reshape(batch.size(0), -1)
+            pca.partial_fit(feature_batch)
+
         actual_eigenvalues = pca.explained_variance_
         # Generate random eigenvalues
         pa = ParallelAnalysis(self.config['iterations'], n_jobs=4)
-        threshold_eigenvalues = pa.fit(features)
+        threshold_eigenvalues = pa.fit(tracker)
 
         # Determine number of components to retain
         n_components = sum(actual_eigenvalues > threshold_eigenvalues)
@@ -68,25 +66,27 @@ class DimensionalityAnalyser:
         logger.info(f"Parallel Analysis suggests {n_components} components")
         return n_components, actual_eigenvalues, threshold_eigenvalues
 
-    def kaiser_harris(self, features):
+    def kaiser_harris(self, tracker):
         """
         Apply Kaiser-Harris criterion to determine number of components.
 
         Returns:
             tuple: (n_components, eigenvalues)
         """
-        n_samples, _ = features.shape
 
-        # Perform PCA
-        pca = PCA(n_components=n_samples)
-        pca.fit(features)
+        pca = IncrementalPCA()
+
+        for batch in tracker.get_activations(None):
+            feature_batch = batch.reshape(batch.size(0), -1)
+            pca.partial_fit(feature_batch)
+
         eigenvalues = pca.explained_variance_
         n_components = sum(eigenvalues > 1.0)
 
         logger.info(f"Kaiser-Harris criterion suggests {n_components} components")
         return n_components, eigenvalues
 
-    def analyze_dimensionality(self, features):
+    def analyze_dimensionality(self, tracker):
         """
         Perform comprehensive dimensionality analysis using multiple methods.
 
@@ -94,14 +94,18 @@ class DimensionalityAnalyser:
             dict: Dictionary containing analysis results and recommended dimensions
         """
         # Perform parallel analysis
-        pa_components, actual_eig, random_eig = self.parallel_analysis(features)
+        pa_components, actual_eig, random_eig = self.parallel_analysis(tracker)
 
         # Perform Kaiser-Harris analysis
-        kh_components, kh_eig = self.kaiser_harris(features)
+        kh_components, kh_eig = self.kaiser_harris(tracker)
 
         # Calculate PCA explained variance for comparison
-        pca = PCA()
-        pca.fit(features)
+        pca = IncrementalPCA()
+
+        for batch in tracker.get_activations(None):
+            feature_batch = batch.reshape(batch.size(0), -1).cpu().numpy()
+            pca.partial_fit(feature_batch)
+
         explained_variance_ratio = pca.explained_variance_ratio_
         cumulative_variance = np.cumsum(explained_variance_ratio)
 
@@ -171,12 +175,9 @@ class DimensionalityAnalyser:
         plt.tight_layout()
         return fig
 
-    def run_analysis(self):
+    def run_analysis(self, tracked_features):
         """Run complete dimensionality analysis and save results."""
-        features_mnist, _ = self.collect_features(self.mnist_loader, 'mnist')
-
-        # Run standard dimensionality analysis on MNIST features
-        dim_results = self.analyze_dimensionality(features_mnist)
+        dim_results = self.analyze_dimensionality(tracked_features)
         fig = self.visualize_analysis(dim_results)
 
         combined_results = {
@@ -194,29 +195,34 @@ class ParallelAnalysis:
         self.n_iterations = n_iterations
         self.n_jobs = n_jobs
 
-    def _single_iteration(self, data_shape, random_seed=None):
+    def _single_iteration(self, data_shape_generator, random_seed=None):
         """Run a single iteration of parallel analysis"""
         if random_seed is not None:
             np.random.seed(random_seed)
 
-        # Generate random normal data
-        random_data = np.random.normal(size=data_shape)
+        pca = IncrementalPCA()
 
-        # Fit PCA and return eigenvalues
-        pca = PCA(n_components=min(data_shape))
-        pca.fit(random_data)
+        for shape in data_shape_generator():
+            random_data = np.random.normal(size=shape)
+            pca.partial_fit(random_data)
+
+
         return pca.explained_variance_
 
-    def fit(self, features):
+    def fit(self, tracker):
         """Run parallel analysis with parallel processing"""
-        data_shape = features.shape
+        def get_batch_shapes():
+            for batch in tracker.get_activations(None):
+                # Get the shape of each batch from the tracker
+                feature_batch = batch.reshape(batch.size(0), -1)
+                yield feature_batch.shape
 
         # Generate random seeds for reproducibility
         random_seeds = np.random.randint(0, np.iinfo(np.int32).max, size=self.n_iterations)
 
         # Run iterations in parallel
         random_eigenvalues = Parallel(n_jobs=self.n_jobs)(
-            delayed(self._single_iteration)(data_shape, seed)
+            delayed(self._single_iteration)(get_batch_shapes, seed)
             for seed in tqdm(random_seeds, desc="Running PA iterations")
         )
 

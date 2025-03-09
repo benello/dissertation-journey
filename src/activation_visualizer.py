@@ -3,9 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import logging
 from typing import Dict, List, Tuple
-from pathlib import Path
-
-from torch import nn
 
 from src.activation_tracking import ActivationTracker
 
@@ -14,7 +11,7 @@ logger = logging.getLogger(__name__)
 class ActivationVisualizer:
     """Visualizes activations of neurons throughout the network."""
     
-    def __init__(self, model):
+    def __init__(self, model, config):
         """
         Initialize the activation visualizer.
         
@@ -24,9 +21,8 @@ class ActivationVisualizer:
         self.model = model
         self.device = model.device
         self.model.to(self.device)
-        self.tracker = ActivationTracker('outputs')
-        self.tracker.set_layers_to_track([nn.Conv2d, nn.ReLU])
-    
+        self.tracker = ActivationTracker('outputs', config)
+
     def visualize_feature_evolution(self, image: torch.Tensor, digit_label: int = None,
                                   selected_channels: List[int] = None) -> plt.Figure:
         """
@@ -44,7 +40,7 @@ class ActivationVisualizer:
         self.tracker.clear()
         
         # Forward pass
-        with torch.no_grad(), self.tracker.track(self.model, None, False) as tracked_model:
+        with torch.no_grad(), self.tracker.track(self.model) as tracked_model:
             tracked_model.eval()
             prediction, _ = tracked_model(image.to(self.device))
         if selected_channels is None:
@@ -53,7 +49,7 @@ class ActivationVisualizer:
         
         # Create figure
         n_channels = len(selected_channels)
-        n_layers = len(self.tracker)
+        n_layers = len(self.tracker.probe_layers)
         fig = plt.figure(figsize=(3 * n_layers, 3 * n_channels))
 
         # Plot evolution of each selected channel
@@ -98,7 +94,7 @@ class ActivationVisualizer:
         
         # Forward pass
         self.model.eval()
-        with torch.no_grad(), self.tracker.track(self.model, None, False) as tracked_model:
+        with torch.no_grad(), self.tracker.track(self.model) as tracked_model:
             _ = tracked_model(image.to(self.device))
         
         results = {}
@@ -131,7 +127,7 @@ class ActivationVisualizer:
 
         # Forward pass
         self.model.eval()
-        with torch.no_grad(), self.tracker.track(self.model, None, False) as tracked_model:
+        with torch.no_grad(), self.tracker.track(self.model) as tracked_model:
             _ = tracked_model(image.to(self.device))
 
         inactive_channels = {}

@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
+from sklearn.metrics import precision_recall_fscore_support
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import logging
@@ -63,7 +63,7 @@ class ModelTrainer:
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.config['batch_size'],
-            shuffle=True,
+            shuffle=False,
         )
         
         test_loader = DataLoader(

@@ -2,9 +2,8 @@ import argparse
 import logging
 
 from matplotlib import pyplot as plt
-from torch import nn
 
-from src.activation_tracking import ActivationTracker
+from src.activation_analysis import ActivationAnalysis
 from src.dimension_analysis import DimensionalityAnalyser
 from src.model import FeatureVisualizerCNN, model_name
 from src.novel_generator import NovelGenerator
@@ -78,13 +77,9 @@ def main():
     # Train if requested
     if args.train:
         logger.info("Starting training phase...")
-        trainer.train()
 
-        # Save the activations during evaluation to disk
-        tracker = ActivationTracker(output_dir)
-        tracker.set_layers_to_track([nn.Conv2d, nn.ReLU])
-        with tracker.track(model, 'evaluation') as _:
-            trainer.evaluate()
+        trainer.train()
+        trainer.evaluate()
 
         # Save trained model
         trainer.save_model(model_path)
@@ -96,11 +91,16 @@ def main():
     novel_generator.save_example_images()
     novel_generator.save_dataset_to_mnist()
 
+    novel_loader = NovelDataset(config['data']['data_dir'] + '/generated_novel')
+
+    dimension_analyser = DimensionalityAnalyser(model, config)
+    tracked_test_features, test_labels = dimension_analyser.collect_features(trainer.test_loader, 'mnist', config)
+
     # Visualize if requested
     if args.visualize_dimension_analysis:
         logger.info("Creating feature visualizations...")
-        dimension_analyser = DimensionalityAnalyser(model, trainer.test_loader, config)
-        results, fig_analysis = dimension_analyser.run_analysis()
+
+        results, fig_analysis = dimension_analyser.run_analysis(tracked_test_features)
 
         # Save pca visualization
         analysis_path = output_dir / 'figures' / 'dimensionality_analysis.png'
@@ -115,7 +115,7 @@ def main():
         logger.info("Creating activation visualizations...")
 
         # Create activation visualizations
-        activation_vis = ActivationVisualizer(model)
+        activation_vis = ActivationVisualizer(model, config)
 
         # Evaluate with novel data if requested
         if args.novel:
@@ -123,7 +123,6 @@ def main():
             novel_generator.save_example_images()
             novel_generator.save_dataset_to_mnist()
 
-            novel_loader = NovelDataset(config['data']['data_dir'] + '/generated_novel')
             cnt = 0
             for image, label in novel_loader:
                 novel_fig = activation_vis.visualize_feature_evolution(image, label)
@@ -172,6 +171,11 @@ def main():
             for idx, (channel, activation) in enumerate(channels, 1):
                 logger.info(f"  {idx}. Channel {channel}: {activation:.4f}")
 
+    logger.info('Calculating feature distances')
+    activation_analyser = ActivationAnalysis(model, config)
+    pca_models = activation_analyser.perform_pca_analysis(tracked_test_features, test_labels, f'{tracked_test_features.probe_layers[0]} Features (Global PCA)')
+    activation_analyser.analyse_sample(pca_models, test_labels, novel_loader)
+    activation_analyser.analyse_sample(pca_models, test_labels, trainer.test_loader)
 
 if __name__ == '__main__':
     main()
