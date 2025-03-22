@@ -33,7 +33,7 @@ class ActivationAnalysis:
         self.device = model.device
         self.config = config
 
-    def perform_pca_analysis(self, tracked_features: ActivationTracker, labels: np.ndarray, title: str):
+    def perform_pca_analysis(self, tracked_features: ActivationTracker, labels: np.ndarray):
         pca_models = {}
         n_components = self.config['analysis']['pca_n_components']
 
@@ -50,15 +50,16 @@ class ActivationAnalysis:
 
         transformed_data = np.concatenate(transformed_activations, axis=0)
 
+        title = f'{tracked_features.probe_layers[0]}(Global PCA)'
         self.plot_pca_3d(transformed_data, labels, title)
         self.plot_pca_pairs(transformed_data, labels, title, n_pairs=2)
 
         plt.figure(figsize=(8, 6))
         scatter = plt.scatter(transformed_data[:, 0], transformed_data[:, 1], c=labels, cmap='viridis', alpha=0.6)
-        plt.xlabel("PC1")
-        plt.ylabel("PC2")
-        plt.title(f"{title} (Global PCA)")
-        plt.colorbar(scatter, label="Class")
+        plt.xlabel('PC1')
+        plt.ylabel('PC2')
+        plt.title(title)
+        plt.colorbar(scatter, label='Class')
         plt.show()
 
         pca_models[-1] = global_pca, transformed_data
@@ -109,12 +110,13 @@ class ActivationAnalysis:
         # First two principal components of each class
         for cls in unique_classes:
             if transformed_per_class[cls]:
+                title =  f'{tracked_features.probe_layers[0]}(Class {cls})'
                 cls_transformed = np.concatenate(transformed_per_class[cls], axis=0)
                 plt.figure(figsize=(6, 5))
                 plt.scatter(cls_transformed[:, 0], cls_transformed[:, 1], alpha=0.6)
-                plt.xlabel("PC1")
-                plt.ylabel("PC2")
-                plt.title(f"{title} (Class {cls})")
+                plt.xlabel('PC1')
+                plt.ylabel('PC2')
+                plt.title(title)
                 plt.show()
 
                 pca_models[cls] = pca_models[cls][0], cls_transformed
@@ -135,11 +137,11 @@ class ActivationAnalysis:
         ax = fig.add_subplot(111, projection='3d')
         scatter = ax.scatter(transformed[:, 0], transformed[:, 1], transformed[:, 2],
                              c=labels, cmap='viridis', alpha=0.6)
-        ax.set_xlabel("PC1")
-        ax.set_ylabel("PC2")
-        ax.set_zlabel("PC3")
+        ax.set_xlabel('PC1')
+        ax.set_ylabel('PC2')
+        ax.set_zlabel('PC3')
         ax.set_title(title)
-        fig.colorbar(scatter, label="Class")
+        fig.colorbar(scatter, label='Class')
         plt.show()
 
     @staticmethod
@@ -162,17 +164,17 @@ class ActivationAnalysis:
 
         for ax, (i, j) in zip(axes, pairs[:n_pairs]):
             sc = ax.scatter(transformed[:, i], transformed[:, j], c=labels, cmap='viridis', alpha=0.6)
-            ax.set_xlabel(f"PC{i + 1}")
-            ax.set_ylabel(f"PC{j + 1}")
-            ax.set_title(f"{title} (PC{i + 1} vs PC{j + 1})")
+            ax.set_xlabel(f'PC{i + 1}')
+            ax.set_ylabel(f'PC{j + 1}')
+            ax.set_title(f'{title} (PC{i + 1} vs PC{j + 1})')
 
         plt.tight_layout()
         plt.show()
 
-    def analyse_sample(self, pca_models,
-                       labels: torch.Tensor,
-                       data_loader: Dataset,
-                       key: int = None):
+    def analyse_samples(self, pca_models,
+                        labels: torch.Tensor,
+                        data_loader: Dataset,
+                        key: int = None):
         """
         Analyze a sample (either a normal or OOD sample) using the global PCA model.
 
@@ -182,9 +184,9 @@ class ActivationAnalysis:
         """
         # Determine sample type and obtain the image
         if not isinstance(data_loader, NovelDataset):
-            sample_type = "Normal"
+            sample_type = 'Normal'
         else:
-            sample_type = "OOD"
+            sample_type = 'OOD'
 
         random_index = random.randint(0, len(data_loader) - 1)
         iterator = iter(data_loader)
@@ -192,21 +194,26 @@ class ActivationAnalysis:
             next(iterator)
 
         data_input, label = next(iterator)
-        sample_image = data_input[0]
+        sample_image = data_input[0].unsqueeze(0)
 
-        plt.imshow(sample_image.squeeze().cpu(), cmap='gray')
-        plt.title(f"{sample_type} Sample Signal")
+        # Prepare image and extract features
+        self.analyse_sample(pca_models, labels, sample_image, sample_type, key)
+
+
+    def analyse_sample(self, pca_models, labels, sample_image, sample_type, key: int = None):
+        plt.imshow(sample_image.squeeze().squeeze().cpu(), cmap='gray')
+        plt.title(f'{sample_type} Sample Signal')
         plt.show()
 
         # Prepare image and extract features
-        sample_image = sample_image.unsqueeze(0).to(self.device)
+        sample_image = sample_image.to(self.device)
 
         tracker = ActivationTracker('outputs', self.config)
         with torch.no_grad() , tracker.track(self.model) as tracked_model:
             outputs, _ = tracked_model(sample_image)
             _, pred = outputs.max(1)
             pred_class = pred.item()
-        logger.info(f"\nAnalyzing {sample_type} sample (predicted as class {pred_class})")
+        logger.info(f'\nAnalyzing {sample_type} sample (predicted as class {pred_class})')
 
         sample_feat = torch.cat(tracker.activations[tracker.probe_layers[0]], dim=0)
         sample_feat = sample_feat.reshape(sample_feat.size(0), -1)
@@ -215,32 +222,108 @@ class ActivationAnalysis:
             for key, (pca, transformed_data) in pca_models.items():
                 sample_pca = pca.transform(sample_feat)
 
-                self._generate_sample_analysis_image(transformed_data, sample_pca, sample_type, key)
+                self._generate_sample_analysis_image(transformed_data, sample_pca, sample_type, key, labels)
         else:
             pca, train_pca = pca_models[key]
             sample_pca = pca.transform(sample_feat)
 
-            self._generate_sample_analysis_image(train_pca, sample_pca, sample_type, key)
+            self._generate_sample_analysis_image(train_pca, sample_pca, sample_type, key, labels)
 
-    def _generate_sample_analysis_image(self, train_pca, sample_pca, sample_type, key):
+    def _generate_sample_analysis_image(self, train_pca, sample_pca, sample_type, key, labels=None):
+        # Set labels to None if key is -1 (global PCA)
+        labels = None if key != -1 else labels
+
+        # Calculate Mahalanobis distances
         cov_matrix = np.cov(train_pca, rowvar=False)
         VI = np.linalg.inv(cov_matrix)
         dists = pairwise_distances(sample_pca, train_pca, metric='mahalanobis', VI=VI)[0]
-        k = self.config['analysis']['k_neighbour']  # number of nearest neighbors
+
+        # Get k nearest neighbors
+        k = self.config['analysis']['k_neighbour']
         nearest_idx = np.argsort(dists)[:k]
         nearest_dists = dists[nearest_idx]
 
-        plt.figure(figsize=(8, 6))
-        plt.scatter(train_pca[:, 0], train_pca[:, 1], label="Training Samples", alpha=0.6)
-        plt.scatter(sample_pca[0, 0], sample_pca[0, 1], color='red', label=f"{sample_type} Sample", s=100)
-        for idx in nearest_idx:
-            plt.plot([sample_pca[0, 0], train_pca[idx, 0]],
+        # Create visualization with subplots
+        fig, (ax1, ax2, ax3) = plt.subplots(
+            1, 3,
+            figsize=(18, 6),
+            gridspec_kw={'width_ratios': [2, 1, 1]}
+        )
+
+        # Main scatter plot with PCA projection
+        if labels is not None:
+            unique_classes = np.unique(labels)
+            cmap = plt.cm.get_cmap('viridis', len(unique_classes))
+
+            for i, cls in enumerate(unique_classes):
+                mask = labels == cls
+                ax1.scatter(train_pca[mask, 0], train_pca[mask, 1],
+                            color=cmap(i), alpha=0.5, label=f'Class {cls}')
+        else:
+            ax1.scatter(train_pca[:, 0], train_pca[:, 1], alpha=0.4, label='Training Data')
+
+        # Highlight the sample point
+        ax1.scatter(sample_pca[0, 0], sample_pca[0, 1], color='red',
+                    marker='*', s=200, label=f'{sample_type} Sample')
+
+        # Highlight nearest neighbors
+        nn_classes = []
+        for i, idx in enumerate(nearest_idx):
+            if labels is not None:
+                nn_classes.append(int(labels[idx]))
+                nn_color = cmap(int(labels[idx]))
+            else:
+                nn_color = 'green'
+
+            # Plot connection lines to nearest neighbors
+            ax1.plot([sample_pca[0, 0], train_pca[idx, 0]],
                      [sample_pca[0, 1], train_pca[idx, 1]],
-                     'k--', alpha=0.5)
-        plt.xlabel("PC1")
-        plt.ylabel("PC2")
-        plt.title(f"{sample_type} Sample Analysis with {key} PCA")
-        plt.legend()
+                     'k--', alpha=0.4)
+
+            # Mark nearest neighbors with numbered points
+            ax1.scatter(train_pca[idx, 0], train_pca[idx, 1],
+                        color=nn_color, edgecolor='black', s=100, zorder=10)
+            ax1.text(train_pca[idx, 0], train_pca[idx, 1], str(i + 1),
+                     ha='center', va='center', fontsize=8, fontweight='bold')
+
+        ax1.set_xlabel('PC1', fontsize=12)
+        ax1.set_ylabel('PC2', fontsize=12)
+        ax1.set_title(f'{sample_type} Sample Analysis with {'Global' if key == -1 else f'Class {key}'} PCA',
+                      fontsize=14)
+        ax1.legend(loc='upper right')
+
+        # Plot nearest neighbor distances
+        bars = ax2.barh(range(k), nearest_dists[::-1], color='skyblue')
+        ax2.set_yticks(range(k))
+        ax2.set_yticklabels([f'#{k - i}' for i in range(k)])
+        ax2.set_xlabel('Mahalanobis Distance', fontsize=12)
+        ax2.set_ylabel('Nearest Neighbor', fontsize=12)
+        ax2.set_title('Nearest Neighbor Distances', fontsize=14)
+
+        # Add class labels to bars if available
+        if labels is not None:
+            for i, (bar, idx) in enumerate(zip(bars, nearest_idx[::-1])):
+                ax2.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height() / 2,
+                         f'Class {labels[nearest_idx[k - i - 1]]}',
+                         va='center', fontsize=10)
+
+        ax3.hist(dists, bins=30, color='lightgreen', alpha=0.7, edgecolor='black')
+        ax3.set_title('Distribution of Distances', fontsize=14)
+        ax3.set_xlabel('Mahalanobis Distance', fontsize=12)
+        ax3.set_ylabel('Frequency', fontsize=12)
+
+        plt.tight_layout()
         plt.show()
 
-        logger.info(f"Mahalanobis Distances to {k} nearest neighbors:{nearest_dists}")
+        # Log structured information about nearest neighbors
+        logger.info(f'\n{'=' * 50}')
+        logger.info(
+            f'NEAREST NEIGHBORS ANALYSIS ({sample_type} Sample, {'Global' if key == -1 else f'Class {key}'} PCA)')
+        logger.info(f'{'=' * 50}')
+        logger.info(f'{'#':<4}{'Distance':<12}{'Class':<8}')
+        logger.info(f'{'-' * 30}')
+
+        for i, (idx, dist) in enumerate(zip(nearest_idx, nearest_dists), 1):
+            class_label = labels[idx] if labels is not None else key
+            logger.info(f'{i:<4}{dist:<12.4f}{class_label:<8}')
+        logger.info(f'{'=' * 50}\n')

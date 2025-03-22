@@ -35,8 +35,8 @@ def parse_args():
                         help='Visualize layer activations')
     parser.add_argument('--visualize-examples', action='store_true',
                         help='Generate and save example images for each representation')
-    parser.add_argument('--digit', type=int, default=None,
-                        help='Specific digit to visualize (0-8)')
+    parser.add_argument('--sample-index', type=int, default=None,
+                        help='Specific sample index to visualize from the dataset')
 
     # Advanced Options
     parser.add_argument('--save-mnist', action='store_true',
@@ -45,8 +45,8 @@ def parse_args():
     args = parser.parse_args()
 
     # Validation
-    if args.digit is not None and (args.digit < 0 or args.digit > 8):
-        parser.error("--digit must be between 0 and 8")
+    if args.sample_index is not None and args.sample_index < 0:
+        parser.error("--sample-index must be a non-negative integer")
 
     return args
 
@@ -91,6 +91,22 @@ def main():
     novel_generator.save_example_images()
     novel_generator.save_dataset_to_mnist()
 
+    if args.sample_index is not None:
+        # Get the specific sample by index
+        dataset = trainer.test_loader.dataset
+        if 0 <= args.sample_index < len(dataset):
+            sample_image, digit_label = dataset[args.sample_index]
+            logger.info(f"Selected sample at index {args.sample_index} with label {digit_label}")
+        else:
+            logger.error(f"Sample index {args.sample_index} out of range (0-{len(dataset) - 1})")
+            return
+    else:
+        sample_image, digit_label = next(iter(trainer.train_loader))
+        sample_image = sample_image[0]
+        digit_label = digit_label[0].item()
+
+    sample_image = sample_image.unsqueeze(0)  # Add batch dimension
+
     novel_loader = NovelDataset(config['data']['data_dir'] + '/generated_novel')
 
     dimension_analyser = DimensionalityAnalyser(model, config)
@@ -119,10 +135,6 @@ def main():
 
         # Evaluate with novel data if requested
         if args.novel:
-            novel_generator = NovelGenerator(config)
-            novel_generator.save_example_images()
-            novel_generator.save_dataset_to_mnist()
-
             cnt = 0
             for image, label in novel_loader:
                 novel_fig = activation_vis.visualize_feature_evolution(image, label)
@@ -132,27 +144,6 @@ def main():
                 cnt += 1
 
             logger.info(f"Feature evolution visualization saved to {output_dir / 'figures' / 'novel_activations'}")
-
-        # Get a sample image
-        if args.digit is not None:
-            sample_image = None
-            digit_label = None
-
-            # Find an image of the requested digit
-            for images, labels in trainer.train_loader:
-                digit_idx = (labels == args.digit).nonzero(as_tuple=True)[0]
-                if len(digit_idx) > 0:
-                    sample_image = images[digit_idx[0]]
-                    digit_label = args.digit
-                    break
-        else:
-            # Get first image from loader
-            sample_image, digit_label = next(iter(trainer.train_loader))
-            sample_image = sample_image[0]
-            digit_label = digit_label[0].item()
-
-        # Add a batch dimension
-        sample_image = sample_image.unsqueeze(0)
 
         # Visualize feature evolution
         fig_evolution = activation_vis.visualize_feature_evolution(sample_image, digit_label)
@@ -173,9 +164,14 @@ def main():
 
     logger.info('Calculating feature distances')
     activation_analyser = ActivationAnalysis(model, config)
-    pca_models = activation_analyser.perform_pca_analysis(tracked_test_features, test_labels, f'{tracked_test_features.probe_layers[0]} Features (Global PCA)')
-    activation_analyser.analyse_sample(pca_models, test_labels, novel_loader)
-    activation_analyser.analyse_sample(pca_models, test_labels, trainer.test_loader)
+    pca_models = activation_analyser.perform_pca_analysis(tracked_test_features, test_labels)
+
+    activation_analyser.analyse_samples(pca_models, test_labels, novel_loader)
+
+    if args.sample_index is not None:
+        activation_analyser.analyse_sample(pca_models, test_labels, sample_image, 'Normal')
+    else:
+        activation_analyser.analyse_samples(pca_models, test_labels, trainer.test_loader)
 
 if __name__ == '__main__':
     main()
