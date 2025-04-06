@@ -229,14 +229,14 @@ class ActivationAnalysis:
 
             self._generate_sample_analysis_image(train_pca, sample_pca, sample_type, key, labels)
 
-    def _generate_sample_analysis_image(self, train_pca, sample_pca, sample_type, key, labels=None):
+    def _generate_sample_analysis_image(self, transformed_data, sample_data, sample_type, key, labels=None):
         # Set labels to None if key is -1 (global PCA)
         labels = None if key != -1 else labels
 
         # Calculate Mahalanobis distances
-        cov_matrix = np.cov(train_pca, rowvar=False)
+        cov_matrix = np.cov(transformed_data, rowvar=False)
         VI = np.linalg.inv(cov_matrix)
-        dists = pairwise_distances(sample_pca, train_pca, metric='mahalanobis', VI=VI)[0]
+        dists = pairwise_distances(sample_data, transformed_data, metric='mahalanobis', VI=VI)[0]
 
         # Get k nearest neighbors
         k = self.config['analysis']['k_neighbour']
@@ -257,13 +257,13 @@ class ActivationAnalysis:
 
             for i, cls in enumerate(unique_classes):
                 mask = labels == cls
-                ax1.scatter(train_pca[mask, 0], train_pca[mask, 1],
+                ax1.scatter(transformed_data[mask, 0], transformed_data[mask, 1],
                             color=cmap(i), alpha=0.5, label=f'Class {cls}')
         else:
-            ax1.scatter(train_pca[:, 0], train_pca[:, 1], alpha=0.4, label='Training Data')
+            ax1.scatter(transformed_data[:, 0], transformed_data[:, 1], alpha=0.4, label='Training Data')
 
         # Highlight the sample point
-        ax1.scatter(sample_pca[0, 0], sample_pca[0, 1], color='red',
+        ax1.scatter(sample_data[0, 0], sample_data[0, 1], color='red',
                     marker='*', s=200, label=f'{sample_type} Sample')
 
         # Highlight nearest neighbors
@@ -276,14 +276,14 @@ class ActivationAnalysis:
                 nn_color = 'green'
 
             # Plot connection lines to nearest neighbors
-            ax1.plot([sample_pca[0, 0], train_pca[idx, 0]],
-                     [sample_pca[0, 1], train_pca[idx, 1]],
+            ax1.plot([sample_data[0, 0], transformed_data[idx, 0]],
+                     [sample_data[0, 1], transformed_data[idx, 1]],
                      'k--', alpha=0.4)
 
             # Mark nearest neighbors with numbered points
-            ax1.scatter(train_pca[idx, 0], train_pca[idx, 1],
+            ax1.scatter(transformed_data[idx, 0], transformed_data[idx, 1],
                         color=nn_color, edgecolor='black', s=100, zorder=10)
-            ax1.text(train_pca[idx, 0], train_pca[idx, 1], str(i + 1),
+            ax1.text(transformed_data[idx, 0], transformed_data[idx, 1], str(i + 1),
                      ha='center', va='center', fontsize=8, fontweight='bold')
 
         ax1.set_xlabel('PC1', fontsize=12)

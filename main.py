@@ -3,6 +3,7 @@ import logging
 
 from matplotlib import pyplot as plt
 
+from src.ResultsHelper import export_csv_data
 from src.activation_analysis import ActivationAnalysis
 from src.dimension_analysis import DimensionalityAnalyser
 from src.model import FeatureVisualizerCNN, model_name
@@ -172,6 +173,9 @@ def main():
         activation_analyser.analyse_sample(pca_models, test_labels, sample_image, 'Normal')
     else:
         activation_analyser.analyse_samples(pca_models, test_labels, trainer.test_loader)
+
+    #if args.export_result:
+    export_csv_data(trainer, model, config, pca_models, test_labels, output_dir)
 
 if __name__ == '__main__':
     main()
