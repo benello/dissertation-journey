@@ -7,7 +7,7 @@ training:
 
 # Tracking parameters
 tracker:
-  probe_layers: ['conv_layers.2']
+  probe_layers: ['conv_layers.0', 'conv_layers.5', 'conv_layers.8']
 
 # Activation Analysis Distance parameters
 analysis:
